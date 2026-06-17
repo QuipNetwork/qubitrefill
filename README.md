@@ -1,4 +1,4 @@
-# pay-with-loser — usage
+# qupick — usage
 
 Pay for a Bitrefill product (gift card, top-up, eSIM) with the **worst-performing crypto** in your
 portfolio — the asset with the lowest expected return μ — then retune the portfolio without it.
@@ -16,12 +16,12 @@ Purchase mechanics are delegated to the sibling [`bitrefill`](../bitrefill/SKILL
 
 ## Install the skill
 
-Claude Code discovers skills under `.claude/skills/`. Because `pay-with-loser` links the bitrefill
+Claude Code discovers skills under `.claude/skills/`. Because `qupick` links the bitrefill
 skill via the relative path `../bitrefill/SKILL.md`, install **both** as siblings:
 
 ```bash
 mkdir -p .claude/skills
-cp -R skills/pay-with-loser .claude/skills/
+cp -R skills/qupick .claude/skills/
 cp -R skills/bitrefill     .claude/skills/
 ```
 
@@ -67,13 +67,13 @@ The skill then runs the 7-step flow from `SKILL.md`:
 
 ```
 Seed → optimize → /market ranked by μ (worst first):
-  BTC   crypto   μ=-0.002567   $230.67   ← worst loser
+  BTC   crypto   μ=-0.002567   $230.67   ← worst performer
   SOL   crypto   μ=-0.000341   $225.07
   USDC  crypto   μ=+0.000046   $2272.70
   ETH   crypto   μ=+0.000129   $229.61
 
 Product: Steam USD $20 ($21.60) · accepts bitcoin/ethereum/solana/usdc_base
-Chosen:  BTC (worst loser, holdings cover price) → pay via Lightning
+Chosen:  BTC (worst performer, holdings cover price) → pay via Lightning
 Invoice: 33,481 sats, status unpaid → pay → complete → redemption code
 Retune:  drop BTC, re-optimize over the remaining 10 currencies
 ```

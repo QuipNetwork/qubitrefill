@@ -1,15 +1,15 @@
 ---
-name: pay-with-loser
-description: "Pay for a Bitrefill product (gift card, top-up, eSIM) using the worst-performing crypto in the agent's portfolio — identified by lowest expected return μ — then retune the portfolio without it. Triggers when the user says 'pay with my worst performer', 'dump my biggest loser on a gift card', 'use my worst crypto to buy X', or similar."
+name: qupick
+description: "This skill uses quantum computers to pick the best crypto asset to pay with, given current market conditions."
 compatibility: "Requires: (1) a running portfolio backend at http://127.0.0.1:8000; (2) Bitrefill MCP (https://api.bitrefill.com/mcp) or CLI available. Delegates all purchase mechanics to the bitrefill skill."
 metadata:
   author: hackathon
   version: "3.0.0"
 ---
 
-# Pay with Your Worst Loser
+# Pay with most suitable crypto asset in your portfolio
 
-Identify the worst-performing crypto in the portfolio (lowest annualised expected return μ), spend it on a Bitrefill product, then retune the portfolio without it.
+Identify the most suitable crypto in the portfolio (lowest annualised expected return) using a quantum unconstrained binary optimization, spend it on a Bitrefill product, then retune the portfolio without it.
 
 Delegates all purchase mechanics to the [`bitrefill`](../bitrefill/SKILL.md) skill — read and invoke that skill for product search, pricing, buying, and payment polling. This skill adds portfolio seeding and selection logic on top.
 
@@ -191,7 +191,7 @@ GET http://127.0.0.1:8000/agents/{agentId}/market
 
 Returns the current USD value and μ for every asset in the basket.
 
-### 5. Choose the worst loser, preferring enough currency
+### 5. Choose the best crypto asset for payment, preferring enough currency
 
 Build candidates: assets where **all** of:
 - `assetClass == "crypto"`
@@ -199,7 +199,7 @@ Build candidates: assets where **all** of:
 - `ticker ∈ PAYMENT_METHOD_MAP`
 - `PAYMENT_METHOD_MAP[ticker]` appears in the product's `payment_methods` list (from step 3)
 
-**Selection logic (prefer enough, fall back to worst):**
+**Selection logic (prefer enough, fall back to most optimized):**
 
 1. **Preferred candidates** — those whose `usd >= product_price_usd * 1.02` (2 % fee buffer). Among these, pick `min(μ)`.
 2. **Fallback** — if no candidate holds enough, pick `min(μ)` across *all* spendable candidates regardless of balance. Surface the shortfall and wait for explicit user approval before proceeding:

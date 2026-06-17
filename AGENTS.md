@@ -50,13 +50,13 @@ This skill enables **real-money transactions**. Codes deliver instantly and digi
 
 For exhaustive enums (countries, payment methods, full endpoint list), see <https://docs.bitrefill.com>.
 
-### Pay with worst loser
+### Qupick
 
-Vendored at [`skills/pay-with-loser/SKILL.md`](skills/pay-with-loser/SKILL.md). Delegates purchase mechanics to the bitrefill skill above and adds portfolio selection on top.
+Vendored at [`skills/qupick/SKILL.md`](skills/qupick/SKILL.md). Delegates purchase mechanics to the bitrefill skill above and adds portfolio selection on top.
 
-**Triggers:** "pay with my worst performer", "dump my biggest loser on a gift card", "use my worst crypto to buy X".
+**Triggers:** "pay with my worst performer", "use my worst crypto to buy X".
 
-**Requires:** portfolio backend running at `http://127.0.0.1:8000`. The skill seeds a new agent over the Bitrefill-payable currencies (BTC, ETH, BNB, SOL, XRP, USDT, USDC, DOGE, ZEC, ALGO, FIL) via `POST /agents` + `POST /agents/{id}/optimize`, or re-uses an existing agent. Uses `GET /agents/{id}/market` to retrieve per-asset μ and holdings, then picks the worst loser that Bitrefill accepts as payment — preferring a candidate whose holdings cover the product price, but falling back to the outright worst loser (with a shortfall warning) when none do. After purchase, retuning drops the spent asset from the basket.
+**Requires:** portfolio backend running at `http://127.0.0.1:8000`. The skill seeds a new agent over the Bitrefill-payable currencies (BTC, ETH, BNB, SOL, XRP, USDT, USDC, DOGE, ZEC, ALGO, FIL) via `POST /agents` + `POST /agents/{id}/optimize`, or re-uses an existing agent. Uses `GET /agents/{id}/market` to retrieve per-asset μ and holdings, then picks the worst performing crypto that Bitrefill accepts as payment — preferring a candidate whose holdings cover the product price, but falling back to the outright worst performing (with a shortfall warning) when none do. After purchase, retuning drops the spent asset from the basket.
 
 #### `GET /agents/{agent_id}/market`
 
