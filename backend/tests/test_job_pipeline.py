@@ -1,4 +1,8 @@
-"""End-to-end optimize pipeline on the synthetic market (first solve + retune)."""
+"""Pure solve pipeline on the synthetic market (first solve + retune).
+
+These cover ``solve_portfolio`` (the DB-free compute core). Persistence and event
+publishing are covered by test_api (the optimize endpoint) and test_persistence.
+"""
 
 from __future__ import annotations
 
@@ -6,9 +10,9 @@ import importlib.util
 
 import pytest
 
-from backend.api.schemas import AgentConfig, SliderValues
-from backend.orchestration.job import run_optimization
-from backend.persistence.agents import get_agent_store
+from backend.api.schemas import SliderValues
+from backend.financial.basket import TICKERS, validate_basket
+from backend.orchestration.job import SolveInput, solve_portfolio
 
 pytestmark = pytest.mark.skipif(
     importlib.util.find_spec("gurobipy") is None, reason="gurobipy not installed"
@@ -17,80 +21,56 @@ pytestmark = pytest.mark.skipif(
 BASKET = ["BTC", "ETH", "SOL", "USDC", "IONQ", "QBTS", "RGTI"]
 
 
-def _config(assets: list[str] | None = BASKET, **sliders: int) -> AgentConfig:
+def _sliders(**overrides: int) -> SliderValues:
     base = {"rebalanceFrequency": 50, "riskPreference": 50, "maxPositionSize": 50}
-    base.update(sliders)
-    return AgentConfig(
-        name="Quanta",
-        handle="q",
-        email="q@example.com",
-        sliders=SliderValues(**base),
-        assets=assets,
+    base.update(overrides)
+    return SliderValues(**base)
+
+
+def _solve(tickers, holdings=None, **sliders):
+    return solve_portfolio(
+        SolveInput(
+            tickers=tickers,
+            sliders=_sliders(**sliders),
+            holdings_units=holdings or {},
+            bankroll=10_000.0,
+        )
     )
 
 
 def test_first_solve_allocates_bankroll_over_the_basket():
-    store = get_agent_store()
-    record = store.create(_config(), bankroll=10_000.0)
+    out = _solve(BASKET)
 
-    outcome = run_optimization(record.id)
-    result = outcome.result
-
-    assert result.kind == "first"
+    assert out.is_first
     # every basket asset is held (w_min floor), nothing outside the basket
-    assert {e.ticker for e in result.portfolio} == set(BASKET)
-    assert sum(e.pct for e in result.portfolio) == pytest.approx(100.0, abs=1e-6)
-    assert sum(e.usd for e in result.portfolio) == pytest.approx(10_000.0, abs=1e-3)
-    assert result.job_id and result.solved_at
-
-    persisted = store.get(record.id)
-    assert persisted.jobs_solved == 1
-    assert set(persisted.holdings_units) == set(BASKET)
-
-    channels = {e.channel for e in outcome.events}
-    assert f"agent:{record.id}" in channels
-    assert "tv" in channels  # new-agent splash on first solve
+    assert {e.ticker for e in out.portfolio} == set(BASKET)
+    assert sum(e.pct for e in out.portfolio) == pytest.approx(100.0, abs=1e-6)
+    assert sum(e.usd for e in out.portfolio) == pytest.approx(10_000.0, abs=1e-3)
+    assert out.total == pytest.approx(10_000.0, abs=1e-3)
+    assert set(out.holdings_units) == set(BASKET)
 
 
 def test_retune_is_value_neutral_and_keeps_the_basket():
-    store = get_agent_store()
-    record = store.create(_config(), bankroll=10_000.0)
-    run_optimization(record.id)
+    first = _solve(BASKET)
+    out = _solve(BASKET, holdings=first.holdings_units, riskPreference=90, maxPositionSize=80)
 
-    new_sliders = _config(riskPreference=90, maxPositionSize=80).sliders
-    outcome = run_optimization(record.id, sliders=new_sliders)
-    result = outcome.result
-
-    assert result.kind == "retune"
-    assert {e.ticker for e in result.portfolio} == set(
-        BASKET
-    )  # basket unchanged unless re-selected
+    assert not out.is_first
+    assert {e.ticker for e in out.portfolio} == set(BASKET)
     # fixed-clock market → stationary spot → retune conserves value
-    assert sum(e.usd for e in result.portfolio) == pytest.approx(10_000.0, abs=1e-2)
-    assert store.get(record.id).jobs_solved == 2
-    assert {e.channel for e in outcome.events} == {f"agent:{record.id}"}
+    assert sum(e.usd for e in out.portfolio) == pytest.approx(10_000.0, abs=1e-2)
 
 
 def test_retune_can_select_a_new_basket():
     """A retune liquidates everything and reallocates over the new basket."""
-    store = get_agent_store()
-    record = store.create(_config(), bankroll=10_000.0)
-    run_optimization(record.id)
-
+    first = _solve(BASKET)
     new_basket = ["HON", "GOOGL", "IBM", "QBTS"]
-    result = run_optimization(record.id, assets=new_basket).result
+    out = _solve(new_basket, holdings=first.holdings_units)
 
-    assert result.kind == "retune"
-    assert {e.ticker for e in result.portfolio} == set(new_basket)
-    # fixed-clock market → liquidation conserves value
-    assert sum(e.usd for e in result.portfolio) == pytest.approx(10_000.0, abs=1e-2)
-    assert store.get(record.id).assets == new_basket
+    assert not out.is_first
+    assert {e.ticker for e in out.portfolio} == set(new_basket)
+    assert sum(e.usd for e in out.portfolio) == pytest.approx(10_000.0, abs=1e-2)
 
 
 def test_no_basket_defaults_to_full_universe():
-    from backend.financial.basket import TICKERS
-
-    store = get_agent_store()
-    record = store.create(_config(assets=None), bankroll=10_000.0)
-    result = run_optimization(record.id).result
-    assert {e.ticker for e in result.portfolio} == set(TICKERS)
+    out = _solve(validate_basket(None))
+    assert {e.ticker for e in out.portfolio} == set(TICKERS)

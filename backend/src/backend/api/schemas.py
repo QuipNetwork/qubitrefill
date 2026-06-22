@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from ..financial.basket import AssetClass
 
@@ -71,8 +71,9 @@ class RoutingResult(BaseModel):
 
 
 class LeaderboardEntry(BaseModel):
+    # No agent_id: the id is the secret API key, so the public board is keyed
+    # by name/handle only.
     rank: int
-    agent_id: str = Field(alias="agentId")
     name: str
     handle: str | None = None
     total: float  # bankroll + plUSD
@@ -99,10 +100,26 @@ class AgentUpdate(BaseModel):
 # -----------------------------------------------------------------------------
 
 
-class SubmitAgentResponse(BaseModel):
-    agent_id: str = Field(alias="agentId")
-    qr_url: str = Field(alias="qrUrl")
-    bankroll: float  # surfaced server-side per Q8
+class RegistrationRequest(BaseModel):
+    """POST /agents — register a new agent. Email + name are required and unique."""
+
+    name: str
+    handle: str | None = None
+    email: EmailStr
+    reach_out: list[str] | None = Field(default=None, alias="reachOut")
+    updates_opt_in: bool | None = Field(default=None, alias="updatesOptIn")
+    sliders: SliderValues
+    assets: list[str] | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class RegistrationResponse(BaseModel):
+    """The API key is emailed out-of-band — never returned in the response body."""
+
+    message: str
+    email: EmailStr
+    bankroll: float
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -135,7 +152,7 @@ class MarketAsset(BaseModel):
 
 
 class MarketResult(BaseModel):
-    agent_id: str = Field(alias="agentId")
+    # Token-derived endpoint — returns the caller's own holdings, so no id is echoed.
     assets: list[MarketAsset]
 
     model_config = ConfigDict(populate_by_name=True)

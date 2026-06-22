@@ -13,6 +13,9 @@ dependencies = [
     "gurobipy>=11.0",
     "dwave-neal>=0.6",
     "dwave-system>=1.20",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+    "email-validator>=2.0",
 ]
 
 [project.scripts]
@@ -38,6 +41,10 @@ packages = ["src/backend"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# One event loop for the whole session so the shared async DB engine never
+# touches a connection across loops (the per-function default would).
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 
 [tool.ruff]
 line-length = 100
@@ -51,3 +58,7 @@ select = ["E", "F", "W", "I", "N", "UP", "B"]
 # disabled rather than mangling the math into lowercase. SolverFailed (N818) keeps
 # its documented name from the handoff conventions.
 ignore = ["E501", "N802", "N803", "N806", "N815", "N818"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection markers are designed to be called in defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header"]

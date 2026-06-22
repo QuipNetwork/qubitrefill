@@ -34,9 +34,11 @@ async def _pump(websocket: WebSocket, channel: str) -> None:
         bus.unsubscribe(channel, queue)
 
 
-@router.websocket("/agents/{agent_id}")
-async def agent_updates(websocket: WebSocket, agent_id: str) -> None:
-    await _pump(websocket, feeds.agent_channel(agent_id))
+@router.websocket("/ws/agent/{handle}")
+async def agent_updates(websocket: WebSocket, handle: str) -> None:
+    # Public-by-design: subscribes by the agent's public handle/name, never the
+    # secret API key. Read-only P&L stream.
+    await _pump(websocket, feeds.agent_channel(handle))
 
 
 @router.websocket("/tv/events")

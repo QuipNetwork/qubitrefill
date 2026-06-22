@@ -138,3 +138,20 @@ CORS_ORIGINS: tuple[str, ...] = (
     "http://127.0.0.1:5173",
 )
 QR_BASE_URL: str = "https://qtw-tradinggame.netlify.app"  # /p/{agentId} deep link base
+
+# -----------------------------------------------------------------------------
+# Database (PostgreSQL, async SQLAlchemy + asyncpg)
+# -----------------------------------------------------------------------------
+
+DATABASE_URL: str = os.environ.get(
+    "DATABASE_URL", "postgresql+asyncpg://qtw:qtw@127.0.0.1:5432/qtw"
+)
+
+# -----------------------------------------------------------------------------
+# Email (Resend) — registration delivers the agent's API key out-of-band
+# -----------------------------------------------------------------------------
+
+# When RESEND_API_KEY is unset the sender falls back to a console logger (dev).
+RESEND_API_KEY: str = os.environ.get("RESEND_API_KEY", "")
+RESEND_API_URL: str = os.environ.get("RESEND_API_URL", "https://api.resend.com/emails")
+EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "Qubitrefill <onboarding@resend.dev>")

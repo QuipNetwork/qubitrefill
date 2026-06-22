@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 
 from . import config
-from .api.schemas import AgentConfig, SliderValues
+from .api.schemas import SliderValues
 from .financial import basket
 from .financial.basket import validate_basket
 from .financial.estimators.covariance import covariance
@@ -23,8 +23,7 @@ from .financial.prices.source import get_source
 from .financial.qubo_encoder import encode_qubo
 from .financial.slider_map import map_sliders
 from .financial.types import PortfolioProblem
-from .orchestration.job import run_optimization
-from .persistence.agents import get_agent_store
+from .orchestration.job import SolveInput, solve_portfolio
 from .solvers.feasibility import check_feasibility
 from .solvers.router import build_providers
 from .solvers.types import SolverFailed
@@ -95,32 +94,34 @@ def cmd_market(args: argparse.Namespace) -> None:
 
 
 def cmd_optimize(args: argparse.Namespace) -> None:
-    """Create an ephemeral agent, run the full pipeline, print the portfolio."""
+    """Run the full pipeline over an ephemeral basket and print the portfolio.
+
+    DB-free: the CLI never persists, so it calls the pure ``solve_portfolio``
+    directly rather than going through the API's registration + auth path.
+    """
     tickers = _basket(args)
-    agent = get_agent_store().create(
-        AgentConfig(name=args.name, sliders=_sliders(args), assets=tickers),
-        bankroll=config.BANKROLL_USD,
-    )
-    params = map_sliders(agent.sliders, len(tickers))
-    print(f"agent {agent.id}  bankroll ${agent.bankroll:,.0f}  basket={len(tickers)} assets")
+    sliders = _sliders(args)
+    params = map_sliders(sliders, len(tickers))
+    print(f"bankroll ${config.BANKROLL_USD:,.0f}  basket={len(tickers)} assets")
     print(
         f"params: γ={params.gamma:.2f}  w_max={params.w_max:.3f}  w_min={params.w_min:.3f}  "
         f"rebalance={params.rebalance_hours}h"
     )
 
-    outcome = run_optimization(agent.id)
-    result = outcome.result
-    print(
-        f"\nsolved by {result.provider} ({result.provider_type}) in "
-        f"{result.solve_time * 1000:.1f} ms · kind={result.kind}"
+    outcome = solve_portfolio(
+        SolveInput(tickers=tickers, sliders=sliders, holdings_units={}, bankroll=config.BANKROLL_USD)
     )
-    print(f"portfolio: {len(result.portfolio)} positions")
+    print(
+        f"\nsolved by {outcome.provider_label} ({outcome.provider_role}) in "
+        f"{outcome.solve_time_s * 1000:.1f} ms · kind={'first' if outcome.is_first else 'retune'}"
+    )
+    print(f"portfolio: {len(outcome.portfolio)} positions")
     print(f"  {'ticker':<8}{'pct':>9}{'usd':>14}")
-    for entry in result.portfolio:
+    for entry in outcome.portfolio:
         print(f"  {entry.ticker:<8}{entry.pct:>8.2f}%{entry.usd:>14,.2f}")
     print(
-        f"  {'total':<8}{sum(e.pct for e in result.portfolio):>8.2f}%"
-        f"{sum(e.usd for e in result.portfolio):>14,.2f}"
+        f"  {'total':<8}{sum(e.pct for e in outcome.portfolio):>8.2f}%"
+        f"{sum(e.usd for e in outcome.portfolio):>14,.2f}"
     )
 
     print("\nsolver race (waited for all):")
@@ -138,7 +139,7 @@ def cmd_optimize(args: argparse.Namespace) -> None:
             tickers,
             "  ← WINNER" if is_winner else "",
         )
-    _print_speedup(winner_solution, outcome.solver_results, result.provider)
+    _print_speedup(winner_solution, outcome.solver_results, outcome.provider_label)
 
 
 def cmd_race(args: argparse.Namespace) -> None:

@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16
+    container_name: qtw-postgres
+    environment:
+      POSTGRES_USER: qtw
+      POSTGRES_PASSWORD: qtw
+      POSTGRES_DB: qtw
+    ports:
+      - "5432:5432"
+    volumes:
+      - qtw_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qtw -d qtw"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  qtw_pgdata:

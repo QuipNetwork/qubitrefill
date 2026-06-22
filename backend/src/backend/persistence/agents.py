@@ -1,133 +1,124 @@
-"""Agent store — config + holdings + valuation + retune history.
+"""Agent repository — async, session-scoped (PostgreSQL via SQLAlchemy).
 
-> In-memory only: a process-local dict guarded by a lock. State is lost on
-> restart and not shared across workers (run uvicorn with --workers 1). Holdings
-> are stored as token **units** (not USD) so mark-to-market is just units × spot.
-> Production durability would swap this class for SQLite/Postgres — see TODO.md.
+Replaces the old in-memory ``AgentStore`` singleton. Each request gets an
+``AgentRepo`` bound to its ``AsyncSession`` (via the ``get_session`` dependency);
+the MTM scheduler opens its own session per tick. Holdings are token **units**
+(not USD) so mark-to-market is just units × spot.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from threading import RLock
-from uuid import uuid4
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.schemas import AgentConfig, AgentUpdate, SliderValues
+from ..db.models import Agent
 
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-@dataclass
-class AgentRecord:
-    id: str
-    name: str
-    handle: str | None
-    email: str | None
-    reach_out: list[str] | None
-    updates_opt_in: bool | None
-    sliders: SliderValues
-    assets: list[str] | None  # the player's basket (re-selectable on retune)
-    bankroll: float
-    holdings_units: dict[str, float] = field(default_factory=dict)
-    total: float = 0.0  # current mark-to-market value
-    pl_usd: float = 0.0
-    pl_pct: float = 0.0
-    jobs_solved: int = 0
-    primary_provider: str = "CPU"  # ProviderType of the latest winning solve
-    created_at: str = ""
-
-    def to_config(self) -> AgentConfig:
-        return AgentConfig(
-            name=self.name,
-            handle=self.handle,
-            email=self.email,
-            reach_out=self.reach_out,
-            updates_opt_in=self.updates_opt_in,
-            sliders=self.sliders,
-            assets=self.assets,
-        )
+def _derive_handle(name: str) -> str:
+    return name.strip().lower().replace(" ", "-")
 
 
-class AgentStore:
-    def __init__(self) -> None:
-        self._agents: dict[str, AgentRecord] = {}
-        self._lock = RLock()
+def agent_to_config(agent: Agent) -> AgentConfig:
+    """ORM Agent → public-facing AgentConfig (used by GET /agents/me)."""
+    return AgentConfig(
+        name=agent.name,
+        handle=agent.handle,
+        email=agent.email,
+        reach_out=agent.reach_out,
+        updates_opt_in=agent.updates_opt_in,
+        sliders=SliderValues(**agent.sliders),
+        assets=agent.assets,
+    )
 
-    def create(self, config: AgentConfig, bankroll: float) -> AgentRecord:
-        with self._lock:
-            agent_id = uuid4().hex[:8]
-            record = AgentRecord(
-                id=agent_id,
-                name=config.name,
-                handle=config.handle,
-                email=config.email,
-                reach_out=config.reach_out,
-                updates_opt_in=config.updates_opt_in,
-                sliders=config.sliders,
-                assets=list(config.assets) if config.assets else None,
-                bankroll=bankroll,
-                total=bankroll,
-                created_at=_now_iso(),
-            )
-            self._agents[agent_id] = record
-            return record
 
-    def get(self, agent_id: str) -> AgentRecord | None:
-        with self._lock:
-            return self._agents.get(agent_id)
+class AgentRepo:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
 
-    def all(self) -> list[AgentRecord]:
-        with self._lock:
-            return list(self._agents.values())
-
-    def update_sliders(self, agent_id: str, sliders: SliderValues) -> None:
-        with self._lock:
-            record = self._agents[agent_id]
-            record.sliders = sliders
-
-    def update_assets(self, agent_id: str, assets: list[str]) -> None:
-        with self._lock:
-            record = self._agents[agent_id]
-            record.assets = list(assets)
-
-    def apply_solve(
+    async def create(
         self,
+        *,
         agent_id: str,
+        name: str,
+        email: str,
+        handle: str | None,
+        reach_out: list[str] | None,
+        updates_opt_in: bool | None,
+        sliders: SliderValues,
+        assets: list[str] | None,
+        bankroll: float,
+    ) -> Agent:
+        agent = Agent(
+            id=agent_id,
+            name=name,
+            email=email,
+            handle=handle or _derive_handle(name),
+            reach_out=reach_out,
+            updates_opt_in=updates_opt_in,
+            sliders=sliders.model_dump(),
+            assets=assets,
+            bankroll=bankroll,
+            holdings_units={},
+            total=bankroll,
+            pl_usd=0.0,
+            pl_pct=0.0,
+            jobs_solved=0,
+            primary_provider="CPU",
+            created_at=_now_iso(),
+        )
+        self.session.add(agent)
+        await self.session.flush()
+        return agent
+
+    async def get(self, agent_id: str) -> Agent | None:
+        return await self.session.get(Agent, agent_id)
+
+    async def get_by_email(self, email: str) -> Agent | None:
+        result = await self.session.execute(select(Agent).where(Agent.email == email))
+        return result.scalar_one_or_none()
+
+    async def get_by_name(self, name: str) -> Agent | None:
+        result = await self.session.execute(select(Agent).where(Agent.name == name))
+        return result.scalar_one_or_none()
+
+    async def all(self) -> list[Agent]:
+        result = await self.session.execute(select(Agent))
+        return list(result.scalars())
+
+    async def update_sliders(self, agent: Agent, sliders: SliderValues) -> None:
+        agent.sliders = sliders.model_dump()
+        await self.session.flush()
+
+    async def update_assets(self, agent: Agent, assets: list[str]) -> None:
+        agent.assets = list(assets)
+        await self.session.flush()
+
+    async def apply_solve(
+        self,
+        agent: Agent,
         holdings_units: dict[str, float],
         total: float,
         provider_type: str,
     ) -> None:
         """Record the outcome of a solve: new holdings, valuation, provider, count."""
-        with self._lock:
-            record = self._agents[agent_id]
-            record.holdings_units = dict(holdings_units)
-            record.total = total
-            record.pl_usd = total - record.bankroll
-            record.pl_pct = (record.pl_usd / record.bankroll * 100.0) if record.bankroll else 0.0
-            record.jobs_solved += 1
-            record.primary_provider = provider_type
+        agent.holdings_units = dict(holdings_units)
+        agent.total = total
+        agent.pl_usd = total - agent.bankroll
+        agent.pl_pct = (agent.pl_usd / agent.bankroll * 100.0) if agent.bankroll else 0.0
+        agent.jobs_solved += 1
+        agent.primary_provider = provider_type
+        await self.session.flush()
 
-    def set_valuation(self, agent_id: str, update: AgentUpdate) -> None:
+    async def set_valuation(self, agent: Agent, update: AgentUpdate) -> None:
         """Update the mark-to-market valuation from the MTM loop."""
-        with self._lock:
-            record = self._agents.get(agent_id)
-            if record is None:
-                return
-            record.total = update.total
-            record.pl_usd = update.pl_usd
-            record.pl_pct = update.pl_pct
-
-    def reset(self) -> None:
-        with self._lock:
-            self._agents.clear()
-
-
-_store = AgentStore()
-
-
-def get_agent_store() -> AgentStore:
-    """Return the process-wide agent store singleton."""
-    return _store
+        agent.total = update.total
+        agent.pl_usd = update.pl_usd
+        agent.pl_pct = update.pl_pct
+        await self.session.flush()

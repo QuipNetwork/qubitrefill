@@ -1,11 +1,13 @@
 """FastAPI application factory.
 
-Wires the HTTP + WS routers, CORS for the MVP origins, and a lifespan that runs
-the MTM scheduler for the life of the server. Run locally with:
+Wires the HTTP + WS routers, the API-key middleware, CORS, and a lifespan that
+initialises the DB (engine + tables) and runs the MTM scheduler. Run locally:
 
+    docker compose up -d            # Postgres on :5432
     uvicorn backend.api.app:app --reload --workers 1
 
-(``--workers 1`` while persistence is in-memory — see TODO.md.)
+(``--workers 1`` keeps the in-process event bus single-writer; the DB itself is
+shared, so multiple workers would only need a cross-process bus — see TODO.md.)
 """
 
 from __future__ import annotations
@@ -19,9 +21,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .. import config
+from ..db.engine import get_engine, get_sessionmaker, init_engine
+from ..db.models import Base
 from ..events.bus import get_bus
 from ..orchestration.scheduler import run_mtm_loop
 from . import routes, ws
+from .auth import APIKeyMiddleware
 
 log = logging.getLogger(__name__)
 
@@ -49,8 +54,12 @@ def _check_market_source() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _check_market_source()
+    init_engine()
+    async with get_engine().begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
     stop = asyncio.Event()
-    task = asyncio.create_task(run_mtm_loop(get_bus(), stop))
+    task = asyncio.create_task(run_mtm_loop(get_bus(), stop, sessionmaker=get_sessionmaker()))
     try:
         yield
     finally:
@@ -60,10 +69,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await task
         except asyncio.CancelledError:
             pass
+        # Note: the engine is process-wide and intentionally NOT disposed here —
+        # tests share it across many app instances and own its lifecycle.
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="QTW 2026 Trading Game", lifespan=lifespan)
+    # Added inner-first: APIKeyMiddleware runs inside CORS, so 401s still carry
+    # CORS headers and preflight OPTIONS never hit the auth check.
+    app.add_middleware(APIKeyMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(config.CORS_ORIGINS),
