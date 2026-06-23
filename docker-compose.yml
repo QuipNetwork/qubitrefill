@@ -16,5 +16,29 @@ services:
       timeout: 3s
       retries: 10
 
+  backend:
+    build:
+      context: ./backend
+    container_name: qtw-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://qtw:qtw@db:5432/qtw
+      MARKET_DATA_SOURCE: synthetic
+      GUROBI_IN_RACE: "0"
+      # Optional: set RESEND_API_KEY in the host env to email API keys for real;
+      # unset → the console sender logs the key to the backend container logs.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-Qubitrefill <onboarding@resend.dev>}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
 volumes:
   qtw_pgdata:

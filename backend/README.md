@@ -95,7 +95,20 @@ stays an offline oracle and the live race is SA vs the QPU.
 ```
 
 Then open `http://127.0.0.1:8000/docs` for interactive Swagger UI — the easiest
-way to click through every endpoint.
+way to click through every endpoint. The same process also serves the qupick MCP
+server at `/mcp` (see the top-level `README.md`).
+
+### Docker
+
+The whole stack (Postgres + this backend) runs from the repo root:
+
+```bash
+docker compose up -d --build      # backend on http://127.0.0.1:8000
+```
+
+The image (`backend/Dockerfile`, multi-stage uv build, non-root) defaults to
+`MARKET_DATA_SOURCE=synthetic` and `GUROBI_IN_RACE=0`, so it solves offline with
+SA — no assets-api, Gurobi licence, or D-Wave token required.
 
 ## Test the API by hand
 
