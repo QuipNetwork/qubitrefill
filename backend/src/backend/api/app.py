@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_mcp import FastApiMCP
 
 from .. import config
 from ..db.engine import get_engine, get_sessionmaker, init_engine
@@ -29,6 +30,17 @@ from . import routes, ws
 from .auth import APIKeyMiddleware
 
 log = logging.getLogger(__name__)
+
+# The backend curl surface the qupick skill drives, exposed as MCP tools. Names
+# are the routes' operation_ids; WS routes are HTTP-only-ignored by fastapi-mcp.
+_MCP_OPERATIONS = [
+    "register_agent",
+    "get_agent",
+    "optimize",
+    "get_market",
+    "get_leaderboard",
+    "ping_backend",
+]
 
 
 def _check_market_source() -> None:
@@ -86,6 +98,18 @@ def create_app() -> FastAPI:
     )
     app.include_router(routes.router)
     app.include_router(ws.router)
+
+    # Mount the MCP server in-process, after the routers so it reads the populated
+    # OpenAPI schema. fastapi-mcp dispatches each tool through this app's own ASGI
+    # stack, so APIKeyMiddleware re-runs on the per-agent routes; headers=["authorization"]
+    # forwards the caller's Bearer key to that internal call.
+    mcp = FastApiMCP(
+        app,
+        name="qupick",
+        include_operations=_MCP_OPERATIONS,
+        headers=["authorization"],
+    )
+    mcp.mount_http(mount_path="/mcp")
     return app
 
 

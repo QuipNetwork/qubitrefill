@@ -25,10 +25,18 @@ _PUBLIC_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
         ("POST", "/agents"),  # registration
         ("GET", "/leaderboard"),
+        ("GET", "/healthz"),  # liveness probe — the qupick MCP readiness check
     }
 )
-# Path prefixes that need no API key (docs, schema, root).
-_PUBLIC_PREFIXES: tuple[str, ...] = ("/docs", "/redoc", "/openapi.json")
+# Path prefixes that need no API key (docs, schema, root, MCP transport).
+#
+# ``/mcp`` is the fastapi-mcp transport endpoint. The MCP handshake and the public
+# ``register_agent`` bootstrap carry no key, so the bare transport must be open.
+# This relaxes nothing that matters: every per-agent tool call is dispatched by
+# fastapi-mcp through the app's own ASGI stack to a protected route
+# (``/agents/me|optimize|market``), where this same middleware re-runs and
+# enforces the forwarded ``Authorization`` header.
+_PUBLIC_PREFIXES: tuple[str, ...] = ("/docs", "/redoc", "/openapi.json", "/mcp")
 
 
 def _is_public(method: str, path: str) -> bool:

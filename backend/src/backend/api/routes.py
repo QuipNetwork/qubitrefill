@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,7 +50,12 @@ router = APIRouter()
 # -----------------------------------------------------------------------------
 # Registration (public)
 # -----------------------------------------------------------------------------
-@router.post("/agents", response_model=RegistrationResponse, status_code=201)
+@router.post(
+    "/agents",
+    response_model=RegistrationResponse,
+    status_code=201,
+    operation_id="register_agent",
+)
 async def register(
     body: RegistrationRequest,
     session: AsyncSession = Depends(get_session),
@@ -104,7 +109,7 @@ async def register(
 # -----------------------------------------------------------------------------
 # Authenticated per-agent endpoints (Bearer-gated; agent from request.state)
 # -----------------------------------------------------------------------------
-@router.get("/agents/me", response_model=AgentConfig)
+@router.get("/agents/me", response_model=AgentConfig, operation_id="get_agent")
 async def get_me(request: Request, session: AsyncSession = Depends(get_session)) -> AgentConfig:
     agent = await AgentRepo(session).get(request.state.agent_id)
     if agent is None:
@@ -112,10 +117,10 @@ async def get_me(request: Request, session: AsyncSession = Depends(get_session))
     return agent_to_config(agent)
 
 
-@router.post("/agents/optimize", response_model=RoutingResult)
+@router.post("/agents/optimize", response_model=RoutingResult, operation_id="optimize")
 async def optimize(
     request: Request,
-    body: OptimizeRequest | None = None,
+    body: OptimizeRequest = Body(default_factory=OptimizeRequest),
     session: AsyncSession = Depends(get_session),
 ) -> RoutingResult:
     repo = AgentRepo(session)
@@ -123,13 +128,11 @@ async def optimize(
     if agent is None:
         raise HTTPException(status_code=404, detail="agent not found")
 
-    sliders = body.sliders if body is not None else None
-    assets = body.assets if body is not None else None
-    if sliders is not None:
-        await repo.update_sliders(agent, sliders)
-    if assets is not None:
+    if body.sliders is not None:
+        await repo.update_sliders(agent, body.sliders)
+    if body.assets is not None:
         try:
-            await repo.update_assets(agent, validate_basket(assets))
+            await repo.update_assets(agent, validate_basket(body.assets))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -169,7 +172,7 @@ async def optimize(
     )
 
 
-@router.get("/agents/market", response_model=MarketResult)
+@router.get("/agents/market", response_model=MarketResult, operation_id="get_market")
 async def market(request: Request, session: AsyncSession = Depends(get_session)) -> MarketResult:
     agent = await AgentRepo(session).get(request.state.agent_id)
     if agent is None:
@@ -201,8 +204,14 @@ def _compute_market(holdings_units: dict[str, float], assets: list[str] | None) 
 
 
 # -----------------------------------------------------------------------------
-# Leaderboard (public)
+# Leaderboard + health (public)
 # -----------------------------------------------------------------------------
-@router.get("/leaderboard", response_model=list[LeaderboardEntry])
+@router.get("/leaderboard", response_model=list[LeaderboardEntry], operation_id="get_leaderboard")
 async def leaderboard(session: AsyncSession = Depends(get_session)) -> list[LeaderboardEntry]:
     return await build_leaderboard(session)
+
+
+@router.get("/healthz", operation_id="ping_backend")
+async def healthz() -> dict[str, bool]:
+    """Cheap liveness probe — no DB, no auth. The qupick MCP server's readiness check."""
+    return {"ok": True}
