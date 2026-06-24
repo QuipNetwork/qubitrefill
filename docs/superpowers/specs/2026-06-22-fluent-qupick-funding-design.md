@@ -32,7 +32,7 @@ stops are removed by defaults (#1, #2), policy (#3), a configurable funding mode
 3. **Funding is account-aware and configurable:** the Bitrefill account holds
    multiple balances (confirmed by the user: USD, EUR, BTC). These balances, plus
    on-chain wallet payment, are funding sources drawn in a configurable priority.
-4. **Retune only when the loser is actually sold.** Paying from a fiat account
+4. **Retune only when the worst performer is actually sold.** Paying from a fiat account
    balance settles the bill without selling crypto, so it must not retune.
 5. **Structure:** prose + a config file the skill reads at startup. No new code
    paths, matching the repo's "agent is instructions" architecture.
@@ -52,23 +52,23 @@ the price.
 ### Settlement waterfall (new)
 
 Let `price = denomination_price_usd × (1 + funding.fee_buffer_pct/100)` and let the
-chosen loser be e.g. `BTC`. Read live balances from `GET /accounts/balance`. Walk
+chosen worst performer be e.g. `BTC`. Read live balances from `GET /accounts/balance`. Walk
 `funding.priority` in order and take the **first source that covers the full
 price** (no invoice splitting — Bitrefill invoices accept one payment method):
 
-| Token | Source | Pays via | Sells loser? | Retune? |
+| Token | Source | Pays via | Sells it? | Retune? |
 |-------|--------|----------|--------------|---------|
-| `account_match` | Bitrefill account balance held in the loser asset (account BTC) | `buy-products(payment_method:"balance", auto_pay:true)` | yes | yes |
-| `onchain_match` | Wallet holdings of the loser asset (on-chain BTC) | `buy-products(payment_method:"bitcoin", return_payment_link:true)` → pay link → poll | yes | yes |
+| `account_match` | Bitrefill account balance held in the worst-performing asset (account BTC) | `buy-products(payment_method:"balance", auto_pay:true)` | yes | yes |
+| `onchain_match` | Wallet holdings of the worst-performing asset (on-chain BTC) | `buy-products(payment_method:"bitcoin", return_payment_link:true)` → pay link → poll | yes | yes |
 | `account_fiat` | Bitrefill USD/EUR account balance | `buy-products(payment_method:"balance", auto_pay:true)` | no | no |
 
 If no source covers the full price, apply `funding.on_shortfall`:
 - `reject` (default): stop with a clear message naming the gap.
 - `confirm`: present the shortfall and wait for explicit user approval to proceed
-  on-chain with the loser asset (the legacy fallback behavior).
+  on-chain with the worst-performing asset (the legacy fallback behavior).
 
 **Default priority:** `["account_match", "onchain_match", "account_fiat"]` —
-prioritizes genuinely selling the loser, uses instant account funds first, and
+prioritizes genuinely selling the worst performer, uses instant account funds first, and
 treats fiat as a gap-filler. Reorder or drop tokens to change behavior (e.g.
 `["account_fiat", "account_match", "onchain_match"]` to spend fiat first, or drop
 `account_fiat` to *only ever* sell crypto).
@@ -87,7 +87,6 @@ it with placeholder values.
 
 ```json
 {
-  "agentId": "afae79c9",
   "defaults": {
     "name": "Konrad",
     "email": "konrad@postquant.xyz",
@@ -104,11 +103,16 @@ it with placeholder values.
 ```
 
 Field behavior:
-- `agentId` — persisted agent. If present, the skill fetches its basket via
-  `GET /agents/{agentId}` and skips creation (removes friction #1). If absent, the
-  skill creates an agent from `defaults` and **writes the returned `agentId` back
-  into `config.json`**.
-- `defaults` — values used only when creating a new agent.
+- **Identity is not stored in `config.json`.** The backend authenticates every
+  per-agent request by an `Authorization: Bearer <key>` header where the key *is*
+  the agent's id (a secret UUID) — there is no `agentId` path parameter and no
+  `GET /agents/{agentId}` route. The key is set once as `QUPICK_API_KEY` (passed by
+  `.mcp.json` as the Bearer header). "Already registered?" is answered by a
+  `get_agent` (`GET /agents/me`) call succeeding, not by a stored id (removes
+  friction #1). The key is delivered by email at registration and is **never
+  returned in any response**, so it cannot be auto-persisted — the user sets
+  `QUPICK_API_KEY` once from that email.
+- `defaults` — values used only when registering a new agent.
 - `funding.priority` — the configurable settlement order (see above).
 - `funding.fee_buffer_pct` — coverage buffer (default 2).
 - `funding.on_shortfall` — `reject` | `confirm`.
@@ -120,10 +124,10 @@ Field behavior:
 ```
 Product:   Steam USD $20
 Price:     $21.60
-Loser:     BTC (bitcoin, μ=-0.0026)            ← always shown
+Worst:     BTC (bitcoin, μ=-0.0026)            ← always shown
 Settle:    <chosen source from the waterfall>
-             e.g. Bitrefill account BTC ($60.00 avail) · sells loser ✓ · will retune
-             or   On-chain BTC (wallet $227)          · sells loser ✓ · will retune
+             e.g. Bitrefill account BTC ($60.00 avail) · sells it ✓ · will retune
+             or   On-chain BTC (wallet $227)          · sells it ✓ · will retune
              or   Bitrefill USD balance ($40.00)      · no sale · portfolio unchanged
 Approve?
 ```
@@ -157,15 +161,17 @@ emits and confirming the registered MCP server name is `bitrefill`.
 1. **New step 0 — read config.** Load `config.json`. On missing/malformed file,
    fall back to today's fully-interactive behavior (ask for name/denomination/etc.)
    and note that no config was found. Never crash.
-2. **Step 2 (seed agent)** — use `config.agentId` if present; otherwise create from
-   `config.defaults` and persist the new `agentId` back to the file.
+2. **Step 2 (seed agent)** — call `get_agent` (`GET /agents/me`, Bearer
+   `QUPICK_API_KEY`); on success, reuse that basket. On `401`/`404`, register from
+   `config.defaults`; the key is emailed, so prompt the user to set `QUPICK_API_KEY`
+   from that email rather than writing it back to the file.
 3. **Step 3 (product)** — apply `denomination.policy` to auto-select the package.
 4. **Step 4 (market)** — unchanged; still fetched, since selection always runs.
 5. **Step 5 — rewrite into selection + settlement waterfall** per the funding model
    above, including the `GET /accounts/balance` read and `on_shortfall` handling.
 6. **Step 6 (confirm + buy)** — the funding-source-aware approval screen; map the
    chosen source to the correct `buy-products` arguments.
-7. **Step 7 (retune)** — gate on the retune rule (only if the loser was sold).
+7. **Step 7 (retune)** — gate on the retune rule (only if the worst performer was sold).
 
 ## Error handling
 
@@ -194,11 +200,11 @@ emits and confirming the registered MCP server name is `bitrefill`.
 No Python is added, so verification is a documented manual checklist run against a
 low-balance Bitrefill account and the local backend:
 
-1. **account_match** — loser asset has enough account balance → settles from
-   balance, instant, retune drops the loser.
-2. **onchain_match** — loser asset short on account balance but covered by wallet →
-   on-chain invoice, poll to `complete`, retune drops the loser.
-3. **account_fiat** — loser asset uncovered by account/wallet but USD balance
+1. **account_match** — worst-performing asset has enough account balance → settles from
+   balance, instant, retune drops it.
+2. **onchain_match** — worst-performing asset short on account balance but covered by wallet →
+   on-chain invoice, poll to `complete`, retune drops it.
+3. **account_fiat** — worst-performing asset uncovered by account/wallet but USD balance
    covers → settles from fiat, **no retune**, portfolio unchanged.
 4. **on_shortfall: reject** — nothing covers → clean stop, no purchase.
 5. **on_shortfall: confirm** — nothing covers → warn + wait, proceed only on yes.

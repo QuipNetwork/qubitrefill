@@ -13,7 +13,7 @@ Purchase mechanics are delegated to the sibling [`bitrefill`](skills/bitrefill/S
 - The **Bitrefill MCP** connected (`https://api.bitrefill.com/mcp`, OAuth or API key), or the
   Bitrefill REST API key — used for product search, balance reads, and invoice creation.
 - A funding source the waterfall can draw on: a pre-funded **Bitrefill account balance** (USD, EUR,
-  and/or the loser asset) and/or a funded on-chain wallet for the loser asset. The funding order is
+  and/or the worst-performing asset) and/or a funded on-chain wallet for that asset. The funding order is
   configurable (see [Configure](#configure)).
 - A **`skills/qupick/config.json`** — copy `skills/qupick/config.example.json` and fill it in. Without
   it the skill still runs, but fully interactively (it asks for name, denomination, and pays on-chain
@@ -58,8 +58,8 @@ server](#connect-the-mcp-server)). Fields:
 **Funding waterfall.** The worst performer (`min(μ)`) is *always* computed. The bill is then settled by
 the first source in `funding.priority` that covers the price:
 
-- `account_match` — Bitrefill account balance held in the loser asset → sells the loser → **retunes**.
-- `onchain_match` — on-chain wallet holdings of the loser asset → sells the loser → **retunes**.
+- `account_match` — Bitrefill account balance held in the worst-performing asset → sells it → **retunes**.
+- `onchain_match` — on-chain wallet holdings of the worst-performing asset → sells it → **retunes**.
 - `account_fiat` — Bitrefill USD/EUR balance → settles without selling crypto → **no retune**.
 
 Reorder or drop tokens to change behaviour — e.g. `["account_fiat", "account_match", "onchain_match"]`
@@ -198,10 +198,10 @@ The skill then runs the flow from `SKILL.md`:
 5. **Select + fund** — compute the worst performer (`min(μ)`) over held, product-accepted crypto, then
    read `GET /accounts/balance` and resolve `funding.priority` to the first source covering the price.
 6. **Confirm + buy (MCP)** — the agent **stops for your explicit approval** at a fully-resolved
-   screen (loser + chosen funding source), then buys: instant `balance` pay, or an on-chain link it
+   screen (worst performer + chosen funding source), then buys: instant `balance` pay, or an on-chain link it
    polls to `complete`. Surfaces the redemption code.
 7. **Retune (MCP)** — `optimize` with the basket minus the spent ticker — **only**
-   when the loser was actually sold (`account_match` / `onchain_match`). Fiat settlement leaves the
+   when the worst performer was actually sold (`account_match` / `onchain_match`). Fiat settlement leaves the
    portfolio unchanged.
 
 ### Example
@@ -214,9 +214,9 @@ The skill then runs the flow from `SKILL.md`:
   ETH   crypto   μ=+0.000129   $229.61
 
 Product:  Steam USD $20 ($21.60, +2% buffer → $22.03) · accepts bitcoin/ethereum/solana/usdc_base
-Loser:    BTC (μ=-0.0026)
+Worst:    BTC (μ=-0.0026)
 Waterfall: account_match → Bitrefill account BTC $60 covers $22.03 ✓
-Settle:   Bitrefill account BTC · sells loser ✓ · will retune
+Settle:   Bitrefill account BTC · sells it ✓ · will retune
 Buy:      payment_method="balance", auto_pay=true → complete → redemption code
 Retune:   drop BTC, re-optimize over the remaining 10 currencies
 ```

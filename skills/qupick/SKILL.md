@@ -295,7 +295,7 @@ mcp__qupick__get_market({})
 
 Returns the current USD value and μ for every asset in the authenticated agent's basket.
 
-### 5. Select the loser, then resolve the funding waterfall
+### 5. Select the worst performer, then resolve the funding waterfall
 
 Selection and settlement are **separate**. Selection always runs and is never bypassed by how the bill is paid.
 
@@ -305,25 +305,25 @@ Selection and settlement are **separate**. Selection always runs and is never by
 - `ticker ∈ PAYMENT_METHOD_MAP`
 - `PAYMENT_METHOD_MAP[ticker]` appears in the product's `payment_methods` list (from step 3)
 
-The **loser** is `min(μ)` across these candidates. If there are no spendable crypto candidates at all, **hard stop** — tell the user and do not silently substitute a stablecoin.
+The **worst performer** is `min(μ)` across these candidates. If there are no spendable crypto candidates at all, **hard stop** — tell the user and do not silently substitute a stablecoin.
 
 **5b. Settlement waterfall.** Let `price = denomination_price_usd × (1 + funding.fee_buffer_pct/100)`. For account balances, **prefer the `account_balances` block already returned by `product-details` in step 3** — each entry's `equivalent_in_product_currency` is pre-converted to the product's currency, so it compares directly against `price` (no FX maths). The standalone `GET /accounts/balance` endpoint above is the fallback when product-details omits it. Walk `funding.priority` in order and take the **first source that covers the full `price`** — no invoice splitting (a Bitrefill invoice takes one payment method):
 
-| Token | Source | Pays via | Sells loser? | Retune? |
+| Token | Source | Pays via | Sells it? | Retune? |
 |-------|--------|----------|--------------|---------|
-| `account_match` | Bitrefill account balance held in the loser asset (e.g. account BTC) | `buy-products(payment_method:"balance", auto_pay:true)` | yes | yes |
-| `onchain_match` | Wallet holdings of the loser asset (on-chain BTC) | `buy-products(payment_method:MAP[loser], return_payment_link:true)` → pay link → poll | yes | yes |
+| `account_match` | Bitrefill account balance held in the worst-performing asset (e.g. account BTC) | `buy-products(payment_method:"balance", auto_pay:true)` | yes | yes |
+| `onchain_match` | Wallet holdings of the worst-performing asset (on-chain BTC) | `buy-products(payment_method:MAP[worst], return_payment_link:true)` → pay link → poll | yes | yes |
 | `account_fiat` | Bitrefill USD/EUR account balance | `buy-products(payment_method:"balance", auto_pay:true)` | no | no |
 
-- `account_match` / `account_fiat` coverage is checked against the **account balances** from `GET /accounts/balance` (the loser-asset balance for `account_match`; the fiat balances for `account_fiat`).
-- `onchain_match` coverage is checked against the loser's **wallet holdings** (`usd` from step 4).
+- `account_match` / `account_fiat` coverage is checked against the **account balances** from `GET /accounts/balance` (the worst-performer balance for `account_match`; the fiat balances for `account_fiat`).
+- `onchain_match` coverage is checked against the worst performer's **wallet holdings** (`usd` from step 4).
 - Record which token was chosen — step 6 maps it to `buy-products` arguments and step 7 gates the retune on it.
 
 **5c. Shortfall.** If no source in `funding.priority` covers the full `price`, apply `funding.on_shortfall`:
 - `reject` (default) — stop with a clear message naming the gap (which sources were tried, how much each covered of `price`). No purchase.
-- `confirm` — present the shortfall and wait for explicit user approval to proceed on-chain with the loser asset (legacy fallback). Only proceed on an explicit yes.
+- `confirm` — present the shortfall and wait for explicit user approval to proceed on-chain with the worst-performing asset (legacy fallback). Only proceed on an explicit yes.
 
-> **Distinguishing `account_match` from `account_fiat`.** Both pay via `payment_method:"balance"`. If `buy-products` / the balance API cannot direct the debit to a specific asset, treat a `balance` payment as `account_fiat` (**no retune**) unless Bitrefill reports the loser-asset balance was actually debited. Never retune on an unconfirmed crypto debit.
+> **Distinguishing `account_match` from `account_fiat`.** Both pay via `payment_method:"balance"`. If `buy-products` / the balance API cannot direct the debit to a specific asset, treat a `balance` payment as `account_fiat` (**no retune**) unless Bitrefill reports the worst-performer balance was actually debited. Never retune on an unconfirmed crypto debit.
 
 ### 6. Confirm + buy (MCP) — the single human stop
 
@@ -332,23 +332,23 @@ Resolve the waterfall to one concrete source **before** showing this screen, so 
 ```
 Product:   [name] — [denomination]
 Price:     $[price]  (incl. [fee_buffer_pct]% buffer)
-Loser:     [TICKER] ([payment_method], μ=[mu])        ← always shown
+Worst:     [TICKER] ([payment_method], μ=[mu])        ← always shown
 Settle:    [chosen source]
-             account_match  → Bitrefill account [TICKER] ($[avail]) · sells loser ✓ · will retune
-             onchain_match  → On-chain [TICKER] (wallet $[usd])     · sells loser ✓ · will retune
+             account_match  → Bitrefill account [TICKER] ($[avail]) · sells it ✓ · will retune
+             onchain_match  → On-chain [TICKER] (wallet $[usd])     · sells it ✓ · will retune
              account_fiat   → Bitrefill [USD/EUR] balance ($[avail]) · no sale · portfolio unchanged
 Approve?
 ```
 
 After explicit approval, use the bitrefill skill to buy, mapping the chosen token to `buy-products` arguments:
 - `account_match` / `account_fiat`: `buy-products(cart_items=[{product_id, package_id, quantity:1}], payment_method="balance", auto_pay=true)` → instant.
-- `onchain_match`: `buy-products(cart_items=[{product_id, package_id, quantity:1}], payment_method=MAP[loser], return_payment_link=true)` → pay via the returned link → poll `get-invoice-by-id` until `status == "complete"`.
+- `onchain_match`: `buy-products(cart_items=[{product_id, package_id, quantity:1}], payment_method=MAP[worst], return_payment_link=true)` → pay via the returned link → poll `get-invoice-by-id` until `status == "complete"`.
 
 Then `get-order-by-id` for the redemption code / QR. Log: `invoice_id`, product, amount, chosen funding token, payment method.
 
-### 7. Retune (MCP) — only if the loser was sold
+### 7. Retune (MCP) — only if the worst performer was sold
 
-Retune **only** when settlement used `account_match` or `onchain_match` (the loser was actually sold). If settlement used `account_fiat`, **skip the retune** and report: "paid from fiat balance; portfolio unchanged."
+Retune **only** when settlement used `account_match` or `onchain_match` (the worst performer was actually sold). If settlement used `account_fiat`, **skip the retune** and report: "paid from fiat balance; portfolio unchanged."
 
 When retuning, remove the spent ticker from the basket and re-optimise (pass only `assets`; omit `sliders` to keep existing values):
 
@@ -370,8 +370,8 @@ mcp__qupick__optimize({
 4. **Product** — `search-products("Steam", country="US")` → `steam-usa`; `product-details` → `smallest_gte($20)` picks `package_id = steam-usa<&>20`, price $21.60, accepts `bitcoin`/`ethereum`/`solana`/`usdc_base`.
 5. **Market** — `get_market({})` → BTC (μ=−0.0026, $227), ETH (μ=+0.0001, $227), SOL (μ=−0.0003, $227), USDC (μ=+0.00005, $2272).
 6. **Select** — all four spendable + accepted. Worst μ = **BTC**. `price = 21.60 × 1.02 = $22.03`.
-7. **Waterfall** — product-details `account_balances`: account BTC ≈ $60 (covers $22.03) → `account_match` wins. Sells the loser → will retune.
-8. **Confirm** — "Steam USD $20 · loser BTC (μ=−0.0026) · settle Bitrefill account BTC ($60) · sells loser ✓ · will retune · Approve?"
+7. **Waterfall** — product-details `account_balances`: account BTC ≈ $60 (covers $22.03) → `account_match` wins. Sells the worst performer → will retune.
+8. **Confirm** — "Steam USD $20 · worst performer BTC (μ=−0.0026) · settle Bitrefill account BTC ($60) · sells it ✓ · will retune · Approve?"
 9. **Buy** — `buy-products(..., payment_method="balance", auto_pay=true)` → instant → redemption code.
 10. **Retune** — `optimize({"assets": ["ETH","BNB","SOL","XRP","USDT","USDC","DOGE","ZEC","ALGO","FIL"]})` (BTC dropped).
 
@@ -384,4 +384,4 @@ This skill executes real-money purchases. See [`skills/bitrefill/references/safe
 - Use a dedicated low-balance account. `config.json` (real email) and `QUPICK_API_KEY` (the agent's secret key) are local-only — `config.json` is gitignored and the key never goes in git.
 - Log every purchase: `invoice_id`, product, amount, funding token, method.
 
-The retune in step 7 is irreversible — when it fires, the spent asset is removed from the basket permanently until the user re-adds it manually. It fires only when the loser was actually sold (`account_match` / `onchain_match`).
+The retune in step 7 is irreversible — when it fires, the spent asset is removed from the basket permanently until the user re-adds it manually. It fires only when the worst performer was actually sold (`account_match` / `onchain_match`).
