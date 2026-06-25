@@ -128,12 +128,6 @@ ASSETS_API_TIMEOUT_S: float = 10.0
 SYNTHETIC_SEED: int = 20260625  # booth day — deterministic synthetic history
 
 # -----------------------------------------------------------------------------
-# API
-# -----------------------------------------------------------------------------
-
-QR_BASE_URL: str = "https://qtw-tradinggame.netlify.app"  # /p/{agentId} deep link base
-
-# -----------------------------------------------------------------------------
 # Database (PostgreSQL, async SQLAlchemy + asyncpg)
 # -----------------------------------------------------------------------------
 
