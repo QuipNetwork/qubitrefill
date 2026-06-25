@@ -84,7 +84,7 @@ Default sensible values when the user hasn't expressed a preference: `{"rebalanc
 }
 ```
 
-In local dev (no `RESEND_API_KEY` on the backend) the key is **printed to the backend console**:
+In local dev (no `SMTP_PASSWORD` on the backend) the key is **printed to the backend console**:
 `[email:console] API key for <name> <<email>>: <key>`.
 
 ### `get_agent` — fetch agent config (authed)
@@ -161,7 +161,7 @@ appears on the public board):
     "plPct": 4.235,
     "jobsSolved": 12,
     "primaryProvider": "QPU"
-  }
+}
 ]
 ```
 
@@ -268,7 +268,7 @@ mcp__qupick__register_agent({
 ```
 
 The API key is **emailed, not returned**. Retrieve it — from the email, or in local dev (no
-`RESEND_API_KEY`) from the backend container logs (`docker compose logs backend`), line
+`SMTP_PASSWORD`) from the backend container logs (`docker compose logs backend`), line
 `[email:console] API key for <name> <<email>>: <key>` — then **set `QUPICK_API_KEY` to it and
 reconnect the MCP server (`/mcp`)** so the per-agent tools authenticate.
 Once `get_agent` succeeds, optimise immediately for the first solve (no arguments):

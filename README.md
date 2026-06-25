@@ -82,7 +82,7 @@ docker compose up -d --build
 This brings up Postgres and the backend (image built from `backend/Dockerfile`), publishing the
 server on `http://127.0.0.1:8000`. The container defaults to `MARKET_DATA_SOURCE=synthetic` and
 `GUROBI_IN_RACE=0` (SA is the CPU solver — no Gurobi licence or D-Wave token needed). With no
-`RESEND_API_KEY` set, the registration key is logged to the backend container
+`SMTP_PASSWORD` set, the registration key is logged to the backend container
 (`docker compose logs backend` → `[email:console] API key …`).
 
 **Local (uv), Postgres from compose:**
@@ -118,7 +118,7 @@ from `QUPICK_API_KEY`:
 ```
 
 First run, you have no key yet: leave `QUPICK_API_KEY` unset, ask the agent to proceed, and it calls
-`register_agent` (a public tool). The key is **emailed**; in local dev (no `RESEND_API_KEY` on the
+`register_agent` (a public tool). The key is **emailed**; in local dev (no `SMTP_PASSWORD` on the
 backend) it is printed to the backend console as `[email:console] API key for … : <key>`. Set
 `QUPICK_API_KEY` to that value and reconnect (`/mcp`); the per-agent tools then authenticate.
 

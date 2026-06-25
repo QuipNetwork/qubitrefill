@@ -1,17 +1,19 @@
 """Email senders for the registration API-key handoff.
 
-``get_email_sender`` is a FastAPI dependency: it returns the Resend sender when
-``RESEND_API_KEY`` is configured, otherwise a console logger (dev/offline). Tests
-override the dependency with ``FakeEmailSender`` to capture the sent key without
-hitting the network.
+``get_email_sender`` is a FastAPI dependency: it returns the Proton SMTP sender
+when ``SMTP_PASSWORD`` is configured, otherwise a console logger (dev/offline).
+Tests override the dependency with ``FakeEmailSender`` to capture the sent key
+without hitting the network.
 """
 
 from __future__ import annotations
 
 import logging
+from email.message import EmailMessage
+from email.utils import parseaddr
 from typing import Protocol
 
-import httpx
+import aiosmtplib
 
 from .. import config
 
@@ -40,22 +42,26 @@ class EmailSender(Protocol):
     async def send_api_key(self, to_email: str, name: str, api_key: str) -> None: ...
 
 
-class ResendEmailSender:
+class ProtonSmtpEmailSender:
+    """Sends via Proton's SMTP submission endpoint (smtp.protonmail.ch:587)."""
+
     async def send_api_key(self, to_email: str, name: str, api_key: str) -> None:
         subject, text, html = _render(name, api_key)
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                config.RESEND_API_URL,
-                headers={"Authorization": f"Bearer {config.RESEND_API_KEY}"},
-                json={
-                    "from": config.EMAIL_FROM,
-                    "to": [to_email],
-                    "subject": subject,
-                    "text": text,
-                    "html": html,
-                },
-            )
-            resp.raise_for_status()
+        msg = EmailMessage()
+        msg["From"] = config.EMAIL_FROM
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.set_content(text)
+        msg.add_alternative(html, subtype="html")
+        await aiosmtplib.send(
+            msg,
+            hostname=config.SMTP_HOST,
+            port=config.SMTP_PORT,
+            username=config.SMTP_USERNAME or parseaddr(config.EMAIL_FROM)[1],
+            password=config.SMTP_PASSWORD,
+            start_tls=config.SMTP_STARTTLS,
+            timeout=10.0,
+        )
 
 
 class ConsoleEmailSender:
@@ -76,6 +82,6 @@ class FakeEmailSender:
 
 
 def get_email_sender() -> EmailSender:
-    if config.RESEND_API_KEY:
-        return ResendEmailSender()
+    if config.SMTP_PASSWORD:
+        return ProtonSmtpEmailSender()
     return ConsoleEmailSender()

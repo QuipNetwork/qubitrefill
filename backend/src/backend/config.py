@@ -148,10 +148,16 @@ DATABASE_URL: str = os.environ.get(
 )
 
 # -----------------------------------------------------------------------------
-# Email (Resend) — registration delivers the agent's API key out-of-band
+# Email (Proton SMTP) — registration delivers the agent's API key out-of-band
 # -----------------------------------------------------------------------------
 
-# When RESEND_API_KEY is unset the sender falls back to a console logger (dev).
-RESEND_API_KEY: str = os.environ.get("RESEND_API_KEY", "")
-RESEND_API_URL: str = os.environ.get("RESEND_API_URL", "https://api.resend.com/emails")
-EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "Qubitrefill <onboarding@resend.dev>")
+# Proton's SMTP submission endpoint (smtp.protonmail.ch:587, STARTTLS). The
+# username is the Proton address and the password is an SMTP token generated in
+# the Proton account settings. When SMTP_PASSWORD is unset the sender falls back
+# to a console logger (dev/offline).
+SMTP_HOST: str = os.environ.get("SMTP_HOST", "smtp.protonmail.ch")
+SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
+SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "")
+SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
+SMTP_STARTTLS: bool = os.environ.get("SMTP_STARTTLS", "true").lower() != "false"
+EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "Qubitrefill <onboarding@protonmail.com>")
