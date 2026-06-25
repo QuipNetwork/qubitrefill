@@ -8,16 +8,28 @@ Everything here is derived from `backend/src/backend/config.py`, `docker-compose
 `.mcp.json.example`, and the auth/email code (`backend/src/backend/api/auth.py`,
 `backend/src/backend/email/sender.py`).
 
+## 0. Decisions for this deployment
+
+Locked choices that the rest of this doc assumes:
+
+| Area | Choice | Consequence |
+|------|--------|-------------|
+| **Postgres** | Company **Supabase** | `DATABASE_URL` → Supabase **session pooler, port 5432** (long-running service). Prefer a **dedicated project or schema** — startup `create_all` should not share company tables. |
+| **Email** | Company **Proton SMTP** | `ProtonSmtpEmailSender` over `smtp.protonmail.ch:587` (STARTTLS); sender `noreply@quip.network`. Needs an SMTP token provisioned. Daily limits are modest — fine for transactional registration mail. |
+| **Hosting** | **DigitalOcean droplet + Caddy** | Single instance is fine but **no longer forced** — the background mark-to-market loop was removed, so the server holds no in-process state. Caddy does auto-HTTPS and SSE pass-through for `/mcp`. `create_all` on a shared DB is the only multi-instance concern (see §7). |
+| **Audience** | **Internal-only** | Per-agent bearer auth is sufficient; rate-limiting public registration is a nice-to-have, not a launch blocker. |
+| **Schema** | Keep startup `create_all` | Fastest to launch; no migration tooling yet (see §7). Re-evaluate before the first schema change. |
+| **Subdomain** | e.g. `qupick.quip.network` | Pointed at the droplet; image pushed to `registry.gitlab.com/quip.network/qupick` (amd64). |
+
 ---
 
 ## 1. What actually gets deployed
 
 | Component | What it is | Notes |
 |-----------|-----------|-------|
-| **Backend** | FastAPI app (`backend.api.app:app`) serving REST + WebSocket + the `/mcp` transport on port `8000` | Containerized (`backend/Dockerfile`); this is the qupick MCP server |
-| **PostgreSQL** | Holds agents (the API keys), jobs, valuations | The `db` service in `docker-compose.yml` is dev-grade only |
+| **Backend** | FastAPI app (`backend.api.app:app`) serving REST + the `/mcp` transport on port `8000` | Containerized (`backend/Dockerfile`); this is the qupick MCP server |
+| **PostgreSQL** | Holds agents (the API keys) and jobs | The `db` service in `docker-compose.yml` is dev-grade only |
 | **assets-api** | External market-data price service (REST, SQLite-backed) | Separate service; only needed when `MARKET_DATA_SOURCE=assets-api` |
-| **Frontend (MVP)** | Netlify-hosted UI / QR deep-link target | `https://qtw-tradinggame.netlify.app`; referenced by CORS + QR base |
 | **qupick skill + client** | Claude Code side that calls the MCP server and Bitrefill | Needs `QUPICK_API_KEY` and `BITREFILL_API_KEY` |
 
 The `docker-compose.yml` in the repo is a **dev stack** (weak Postgres password,
@@ -28,8 +40,8 @@ production manifest.
 
 ## 2. External accounts to create
 
-The backend (the server you deploy) talks to PostgreSQL, Resend, D-Wave, and the
-assets-api — nothing else. **Bitrefill is not a server dependency**: there are no
+The backend (the server you deploy) talks to PostgreSQL, an SMTP server, D-Wave,
+and the assets-api — nothing else. **Bitrefill is not a server dependency**: there are no
 Bitrefill calls anywhere in `backend/` — it is used only by the qupick/bitrefill
 skill running client-side in Claude Code. Keep the two surfaces separate.
 
@@ -37,13 +49,12 @@ skill running client-side in Claude Code. Keep the two surfaces separate.
 
 | # | Service | Why it's needed | What to obtain | Cost / gotchas |
 |---|---------|-----------------|----------------|----------------|
-| 1 | **Managed PostgreSQL** (RDS / Cloud SQL / Neon / self-hosted 16) | System of record; **stores the API keys** that are the only credential per agent | A `postgresql+asyncpg://…` connection string with a strong password, TLS enabled | Losing this DB = losing every account. Back it up. Don't reuse the `qtw:qtw` dev creds. |
-| 2 | **Resend** (https://resend.com) | Registration emails the API key out-of-band; without working email **registration fails and rolls back** (`routes.py:95-100`) | An API key; a **verified sending domain** (DKIM/SPF DNS records) | Free tier has send limits. The default `onboarding@resend.dev` From only reaches your own address — useless for real clients. |
+| 1 | **Supabase Postgres** (company account) | System of record; **stores the API keys** that are the only credential per agent | A `postgresql+asyncpg://…` string for the **session pooler (port 5432)**, in a dedicated project/schema, TLS enabled | Access provisioned by whoever manages the Supabase account. Losing this DB = losing every account — back it up. Don't reuse the `qtw:qtw` dev creds. |
+| 2 | **Proton SMTP** (company `quip.network` plan) | Registration emails the API key out-of-band; without working email **registration fails and rolls back** (`routes.py` register handler) | An SMTP token + sender (`noreply@quip.network`); host `smtp.protonmail.ch`, port `587`, STARTTLS | Provisioned by whoever owns the Proton plan. Daily send limits are modest — fine for transactional mail, not bulk. |
 | 3 | **D-Wave Leap** (https://cloud.dwavesys.com) | The QPU competitor in the solver race; joins **only when `DWAVE_API_TOKEN` is set** | A Leap account + Solver API token | **QPU time costs real money / quota per job.** Without the token the backend runs SA-only (CPU) and still works. |
 | 4 | **assets-api host** | Live prices for μ/Σ when not synthetic | A reachable base URL for the price service (you stand this up separately) | If you can't host it, ship with `MARKET_DATA_SOURCE=synthetic` (deterministic, offline) and accept fake prices. |
-| 5 | **Netlify** (or wherever the MVP frontend lives) | Hosts the UI and the QR `/p/{agentId}` deep-link target | The deployed frontend URL | Its origin must match `CORS_ORIGINS` and `QR_BASE_URL` (currently hardcoded — see §4). |
-| 6 | **DNS + domain** | Email domain verification (#2) and TLS for the backend (§5) | A domain you control; DNS access | Needed by both Resend and your HTTPS termination. |
-| 7 | **Gurobi** (dev only) | Local oracle in the solver race | A license **only on dev machines** | **Not deployed to prod** (licensing). Set `GUROBI_IN_RACE=0` in production. |
+| 5 | **DNS + domain** | A subdomain (e.g. `qupick.quip.network`) pointed at the droplet; TLS for the backend (§4) | DNS access for `quip.network` | Caddy gets its certificate for this name; the sender domain is already `quip.network`. |
+| 6 | **Gurobi** (dev only) | Local oracle in the solver race | A license **only on dev machines** | **Not deployed to prod** (licensing). Set `GUROBI_IN_RACE=0` in production. |
 
 ### 2b. Client-side (qupick skill) accounts — not part of the server deploy
 
@@ -67,22 +78,26 @@ secret store, **never** in git or the image.
 
 | Env var | Default | Production action |
 |---------|---------|-------------------|
-| `DATABASE_URL` | `postgresql+asyncpg://qtw:qtw@127.0.0.1:5432/qtw` | Point at managed Postgres with a strong password + TLS |
-| `RESEND_API_KEY` | `""` (→ console logger) | Set to a real Resend key, or registration emails won't send |
-| `EMAIL_FROM` | `Qubitrefill <onboarding@resend.dev>` | An address on your **verified** Resend domain |
+| `DATABASE_URL` | `postgresql+asyncpg://qtw:qtw@127.0.0.1:5432/qtw` | Point at the Supabase **session pooler (:5432)** with TLS |
+| `SMTP_PASSWORD` | `""` (→ console logger) | The Proton SMTP token (secret). **Unset → emails only log to console**, so registration "succeeds" without delivering a key |
+| `SMTP_USERNAME` | `""` (→ `EMAIL_FROM` address) | The Proton SMTP login; defaults to the `EMAIL_FROM` address when blank |
+| `EMAIL_FROM` | `Qubitrefill <noreply@quip.network>` | Sender on the `quip.network` Proton plan |
 | `MARKET_DATA_SOURCE` | `assets-api` | `assets-api` (real) or `synthetic` (offline). Compose overrides to `synthetic` |
 | `ASSETS_API_BASE_URL` | `http://127.0.0.1:8080` | Reachable assets-api URL when source is `assets-api` |
 | `GUROBI_IN_RACE` | `1` | Set `0` in production (no Gurobi license there) |
+| `PORT` | `8000` | Internal listen port behind Caddy (e.g. `8080`) |
 
 **Optional / tuning:**
 
 | Env var | Default | Purpose |
 |---------|---------|---------|
+| `SMTP_HOST` | `smtp.protonmail.ch` | SMTP submission host; override only for a different relay |
+| `SMTP_PORT` | `587` | SMTP submission port |
+| `SMTP_STARTTLS` | `true` | STARTTLS on; set `false` only for a plaintext local relay |
 | `DWAVE_API_TOKEN` | unset | Enables the QPU competitor. Unset → SA-only |
 | `DWAVE_NUM_READS` | `500` | QPU reads (parity with SA) |
 | `DWAVE_ANNEAL_TIME_US` | `100` | Anneal time per read |
 | `DWAVE_CHAIN_STRENGTH_PREFACTOR` | `3.0` | Raise if `qtw verify-dwave` shows >5% chain breaks |
-| `RESEND_API_URL` | `https://api.resend.com/emails` | Leave unless proxying |
 
 **Client / skill side (not the backend service):**
 
@@ -93,54 +108,38 @@ secret store, **never** in git or the image.
 
 ---
 
-## 4. Config edits that need code changes (not just env)
+## 4. Infrastructure prerequisites
 
-Two production-relevant values are **hardcoded** in `config.py`, not env-driven.
-If your frontend/domain differs from the demo, you must edit the code (or make
-them env-overridable first):
-
-- `CORS_ORIGINS` (`config.py:131-135`) — currently `qtw-tradinggame.netlify.app`
-  plus localhost. A browser frontend on any other origin will be CORS-blocked.
-- `QR_BASE_URL` (`config.py:136`) — `https://qtw-tradinggame.netlify.app`; the
-  `/p/{agentId}` deep-link base baked into QR codes.
-
-Recommended: lift both to `os.environ.get(...)` before deploying to a new domain,
-mirroring how `DATABASE_URL` etc. are done.
-
----
-
-## 5. Infrastructure prerequisites
-
-- **TLS / HTTPS in front of the backend.** The app serves plain HTTP on `8000`,
-  and the per-agent API key travels as `Authorization: Bearer <key>` on every
-  request **including the public `/mcp` transport**. Terminate TLS at a reverse
-  proxy (nginx/Caddy/ALB) so keys are never in cleartext on the wire.
+- **TLS / HTTPS in front of the backend.** The app serves plain HTTP on its
+  internal `PORT` (default `8000`; set e.g. `8080` behind the proxy), and the
+  per-agent API key travels as `Authorization: Bearer <key>` on every request
+  **including the public `/mcp` transport**. **Caddy** terminates TLS (auto-HTTPS)
+  on the DigitalOcean droplet so keys are never in cleartext on the wire. Caddy
+  also passes the `/mcp` SSE/streaming connection through unbuffered.
 - **Database schema management.** There is **no Alembic / migrations**. Tables are
-  created at startup via `Base.metadata.create_all` (`app.py:71`), which only
+  created at startup via `Base.metadata.create_all` (`app.py` lifespan), which only
   creates missing tables — it does **not** alter existing ones. Plan a migration
   story before the first schema change in production.
 - **PostgreSQL backups + encryption at rest.** The DB holds the API keys (each is
   the primary key *and* the only credential). Encrypt at rest; take regular,
   tested backups; lock down network access.
-- **Container registry + image build.** Build `backend/Dockerfile`, push to your
-  registry; the dev `docker-compose build` is not a deploy path.
-- **Background scheduler.** The app starts a mark-to-market loop
-  (`run_mtm_loop`, `app.py:74`) inside the process. Run a single backend instance
-  for that loop, or externalize/guard it before horizontal scaling (otherwise
-  every replica ticks).
+- **Container registry + image build.** Build `backend/Dockerfile` (amd64), push to
+  `registry.gitlab.com/quip.network/qupick`; the dev `docker-compose build` is not
+  a deploy path.
 - **Health check.** `GET /healthz` is public and DB-free — wire it to your
   orchestrator's liveness/readiness probe (compose already does).
 
 ---
 
-## 6. Security checklist
+## 5. Security checklist
 
 - [ ] Strong, unique `DATABASE_URL` password; DB not publicly reachable.
 - [ ] Postgres encrypted at rest; backups encrypted and access-controlled.
-- [ ] TLS in front of the backend (keys flow on every request — §5).
-- [ ] Server secrets (`RESEND_API_KEY`, `DWAVE_API_TOKEN`, DB creds) in a secret
+- [ ] TLS in front of the backend (keys flow on every request — §4).
+- [ ] Server secrets (`SMTP_PASSWORD`, `DWAVE_API_TOKEN`, DB creds) in a secret
       manager, not in the image or compose file.
-- [ ] `EMAIL_FROM` on a verified domain; test that a real client inbox receives the key.
+- [ ] `EMAIL_FROM` (`noreply@quip.network`) sends via Proton SMTP; test that a real
+      client inbox receives the key.
 - [ ] `GUROBI_IN_RACE=0` in prod (no license deployed).
 - [ ] Decide on **key rotation** — there is currently no rotation/revocation
       endpoint; the only way to invalidate a key is to delete the agent row.
@@ -153,7 +152,7 @@ real-money blast radius.
 
 ---
 
-## 7. Pre-launch verification (do these against staging first)
+## 6. Pre-launch verification (do these against staging first)
 
 1. **DB connectivity** — backend boots, `create_all` runs, `GET /healthz` → 200.
 2. **Registration → real email** — `POST /agents`; confirm the API key lands in a
@@ -167,8 +166,6 @@ real-money blast radius.
    is reachable and returns prices; otherwise confirm `synthetic` is intended.
 6. **Solver race** — with `DWAVE_API_TOKEN` set, run `qtw verify-dwave` and check
    chain breaks <5%; without it, confirm SA-only still solves.
-7. **CORS / QR** — load the real frontend origin; confirm no CORS errors and QR
-   deep links point at the right domain (§4).
 
 Client-side check (not a server test): run the qupick flow once with a real
 `BITREFILL_API_KEY` against a low-balance account and confirm the approval gate
@@ -176,10 +173,9 @@ fires before `buy-products`.
 
 ---
 
-## 8. Known gaps to decide on before launch
+## 7. Known gaps to decide on before launch
 
 - No DB migration tooling (schema changes are manual).
 - No API-key rotation/revocation flow.
 - No rate limiting on public registration.
-- `CORS_ORIGINS` and `QR_BASE_URL` are hardcoded to the demo domain.
 - `assets-api` is an external dependency this repo does not ship — host it or run synthetic.
