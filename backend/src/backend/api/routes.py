@@ -21,8 +21,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import config
 from ..db.engine import get_session
 from ..email.sender import EmailSender, get_email_sender
-from ..events import feeds
-from ..events.bus import get_bus
 from ..financial.basket import get_asset, validate_basket
 from ..financial.estimators.expected_return import expected_return
 from ..financial.prices.source import get_source
@@ -33,7 +31,6 @@ from ..persistence.leaderboard import build_leaderboard
 from ..solvers.types import SolverFailed
 from .schemas import (
     AgentConfig,
-    AgentUpdate,
     LeaderboardEntry,
     MarketAsset,
     MarketResult,
@@ -149,16 +146,6 @@ async def optimize(
 
     await repo.apply_solve(agent, outcome.holdings_units, outcome.total, outcome.provider_role)
     job = await JobRepo(session).record(agent.id, outcome.provenance)
-
-    # Publish on the agent's PUBLIC channel (handle/name — never the secret id).
-    pl_usd = outcome.total - agent.bankroll
-    pl_pct = (pl_usd / agent.bankroll * 100.0) if agent.bankroll else 0.0
-    update = AgentUpdate(pl_usd=pl_usd, pl_pct=pl_pct, total=outcome.total)
-    handle = agent.handle or agent.name
-    bus = get_bus()
-    bus.publish(feeds.agent_channel(handle), update.model_dump(by_alias=True))
-    if outcome.is_first:
-        bus.publish(feeds.TV_CHANNEL, {"type": "new-agent", "handle": handle, "name": agent.name})
 
     return RoutingResult(
         provider=outcome.provider_label,

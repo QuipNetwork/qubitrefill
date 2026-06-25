@@ -1,13 +1,10 @@
 """FastAPI application factory.
 
-Wires the HTTP + WS routers, the API-key middleware, and a lifespan that
+Wires the HTTP routes, the API-key middleware, and a lifespan that
 initialises the DB (engine + tables). Run locally:
 
     docker compose up -d            # Postgres on :5432
     uvicorn backend.api.app:app --reload --workers 1
-
-(``--workers 1`` keeps the in-process event bus single-writer; the DB itself is
-shared, so multiple workers would only need a cross-process bus — see TODO.md.)
 """
 
 from __future__ import annotations
@@ -22,13 +19,13 @@ from fastapi_mcp import FastApiMCP
 from .. import config
 from ..db.engine import get_engine, init_engine
 from ..db.models import Base
-from . import routes, ws
+from . import routes
 from .auth import APIKeyMiddleware
 
 log = logging.getLogger(__name__)
 
 # The backend curl surface the qupick skill drives, exposed as MCP tools. Names
-# are the routes' operation_ids; WS routes are HTTP-only-ignored by fastapi-mcp.
+# are the routes' operation_ids.
 _MCP_OPERATIONS = [
     "register_agent",
     "get_agent",
@@ -74,7 +71,6 @@ def create_app() -> FastAPI:
     app = FastAPI(title="QTW 2026 Trading Game", lifespan=lifespan)
     app.add_middleware(APIKeyMiddleware)
     app.include_router(routes.router)
-    app.include_router(ws.router)
 
     # Mount the MCP server in-process, after the routers so it reads the populated
     # OpenAPI schema. fastapi-mcp dispatches each tool through this app's own ASGI

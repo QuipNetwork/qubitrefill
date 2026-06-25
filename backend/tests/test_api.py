@@ -1,4 +1,4 @@
-"""API surface via FastAPI TestClient: registration, API-key auth, and a WS push."""
+"""API surface via FastAPI TestClient: registration, API-key auth, and per-agent routes."""
 
 from __future__ import annotations
 
@@ -108,16 +108,6 @@ def test_optimize_returns_routing_result(client, fake_email):
     assert body["providerType"] in ("QPU", "CPU")
     assert {entry["ticker"] for entry in body["portfolio"]} == set(_BASKET)
     assert sum(entry["pct"] for entry in body["portfolio"]) == pytest.approx(100.0, abs=1e-6)
-
-
-@requires_gurobi
-def test_websocket_streams_agent_update(client, fake_email):
-    key = _register(client, fake_email, name="Cypher")
-    client.post("/agents/optimize", json={}, headers=_auth(key))
-    with client.websocket_connect("/ws/agent/cypher") as socket:
-        client.post("/agents/optimize", json={}, headers=_auth(key))  # retune → push
-        update = socket.receive_json()
-        assert {"plUSD", "plPct", "total"} <= set(update)
 
 
 def test_market_returns_asset_data_for_basket(client, fake_email):
