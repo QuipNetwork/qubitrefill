@@ -115,7 +115,8 @@ secret store, **never** in git or the image.
   per-agent API key travels as `Authorization: Bearer <key>` on every request
   **including the public `/mcp` transport**. **Caddy** terminates TLS (auto-HTTPS)
   on the DigitalOcean droplet so keys are never in cleartext on the wire. Caddy
-  also passes the `/mcp` SSE/streaming connection through unbuffered.
+  also passes the `/mcp` SSE/streaming connection through unbuffered
+  (`flush_interval -1`). The repo `Caddyfile` is the ready-to-use config.
 - **Database schema management.** There is **no Alembic / migrations**. Tables are
   created at startup via `Base.metadata.create_all` (`app.py` lifespan), which only
   creates missing tables — it does **not** alter existing ones. Plan a migration

@@ -1,0 +1,22 @@
+# Reverse proxy for the qupick MCP server on the deployment droplet.
+#
+# Caddy terminates TLS (auto-HTTPS via Let's Encrypt for the domain below) and
+# forwards to the backend container, which serves plain HTTP on PORT (default
+# 8000). If you run the container with a different PORT, update the upstream.
+#
+# On the droplet this lives at /etc/caddy/Caddyfile; `caddy reload` after edits
+# (the systemd `caddy` service reads that path by default).
+
+qupick.quip.network {
+	reverse_proxy localhost:8000 {
+		# The /mcp transport streams Server-Sent Events. Flush every write
+		# immediately — otherwise Caddy buffers the response and MCP clients
+		# hang until the stream closes.
+		flush_interval -1
+	}
+
+	# Uncomment to keep access logs on the droplet:
+	# log {
+	# 	output file /var/log/caddy/qupick.log
+	# }
+}
