@@ -15,7 +15,7 @@ Locked choices that the rest of this doc assumes:
 | Area | Choice | Consequence |
 |------|--------|-------------|
 | **Postgres** | Company **Supabase** | `DATABASE_URL` → Supabase **session pooler, port 5432** (long-running service). Prefer a **dedicated project or schema** — startup `create_all` should not share company tables. |
-| **Email** | Company **Proton SMTP** | `ProtonSmtpEmailSender` over `smtp.protonmail.ch:587` (STARTTLS); sender `noreply@quip.network`. Needs an SMTP token provisioned. Daily limits are modest — fine for transactional registration mail. |
+| **Email** | **Resend** SMTP relay | `SmtpEmailSender` over `smtp.resend.com:587` (STARTTLS); username `resend`, password is a Resend API key; sender `noreply@quip.network`. The `quip.network` domain must be verified in Resend. Plain SMTP, so switching relays later is env-only. |
 | **Hosting** | **DigitalOcean droplet + Caddy** | Single instance is fine but **no longer forced** — the background mark-to-market loop was removed, so the server holds no in-process state. Caddy does auto-HTTPS and SSE pass-through for `/mcp`. `create_all` on a shared DB is the only multi-instance concern (see §7). |
 | **Audience** | **Internal-only** | Per-agent bearer auth is sufficient; rate-limiting public registration is a nice-to-have, not a launch blocker. |
 | **Schema** | Keep startup `create_all` | Fastest to launch; no migration tooling yet (see §7). Re-evaluate before the first schema change. |
@@ -51,7 +51,7 @@ skill running client-side in Claude Code. Keep the two surfaces separate.
 | # | Service | Why it's needed | What to obtain | Cost / gotchas |
 |---|---------|-----------------|----------------|----------------|
 | 1 | **Supabase Postgres** (company account) | System of record; **stores the API keys** that are the only credential per agent | A `postgresql+asyncpg://…` string for the **session pooler (port 5432)**, in a dedicated project/schema, TLS enabled | Access provisioned by whoever manages the Supabase account. Losing this DB = losing every account — back it up. Don't reuse the `qtw:qtw` dev creds. |
-| 2 | **Proton SMTP** (company `quip.network` plan) | Registration emails the API key out-of-band; without working email **registration fails and rolls back** (`routes.py` register handler) | An SMTP token + sender (`noreply@quip.network`); host `smtp.protonmail.ch`, port `587`, STARTTLS | Provisioned by whoever owns the Proton plan. Daily send limits are modest — fine for transactional mail, not bulk. |
+| 2 | **Resend** (https://resend.com) | Registration emails the API key out-of-band; without working email **registration fails and rolls back** (`routes.py` register handler) | A Resend account with the `quip.network` sending domain **verified** (SPF/DKIM DNS); an API key; username `resend`, host `smtp.resend.com`, port `587`, STARTTLS | Free tier covers transactional volume. Switching relays later is an env change (plain SMTP). |
 | 3 | **D-Wave Leap** (https://cloud.dwavesys.com) | The QPU competitor in the solver race; joins **only when `DWAVE_API_TOKEN` is set** | A Leap account + Solver API token | **QPU time costs real money / quota per job.** Without the token the backend runs SA-only (CPU) and still works. |
 | 4 | **assets-api host** | Live prices for μ/Σ when not synthetic | A reachable base URL for the price service (you stand this up separately) | If you can't host it, ship with `MARKET_DATA_SOURCE=synthetic` (deterministic, offline) and accept fake prices. |
 | 5 | **DNS + domain** | A subdomain (e.g. `qupick.quip.network`) pointed at the droplet; TLS for the backend (§4) | DNS access for `quip.network` | Caddy gets its certificate for this name; the sender domain is already `quip.network`. |
@@ -79,20 +79,21 @@ secret store, **never** in git or the image.
 
 | Env var | Default | Production action |
 |---------|---------|-------------------|
-| `DATABASE_URL` | `postgresql+asyncpg://qtw:qtw@127.0.0.1:5432/qtw` | Point at the Supabase **session pooler (:5432)** with TLS |
-| `SMTP_PASSWORD` | `""` (→ console logger) | The Proton SMTP token (secret). **Unset → emails only log to console**, so registration "succeeds" without delivering a key |
-| `SMTP_USERNAME` | `""` (→ `EMAIL_FROM` address) | The Proton SMTP login; defaults to the `EMAIL_FROM` address when blank |
-| `EMAIL_FROM` | `Qubitrefill <noreply@quip.network>` | Sender on the `quip.network` Proton plan |
+| `DATABASE_URL` | `postgresql+asyncpg://qtw:qtw@127.0.0.1:5432/qtw` | Point at the Supabase **session pooler (:5432)**, appending **`?ssl=require`** (asyncpg's form — `sslmode=` is rejected) |
+| `SMTP_PASSWORD` | `""` (→ console logger) | The Resend **API key** (secret). **Unset → emails only log to console**, so registration "succeeds" without delivering a key |
+| `SMTP_USERNAME` | `resend` | The Resend SMTP login — the literal string `resend` |
+| `EMAIL_FROM` | `Qubitrefill <noreply@quip.network>` | Sender; `quip.network` must be a **verified domain** in Resend |
 | `MARKET_DATA_SOURCE` | `assets-api` | `assets-api` (real) or `synthetic` (offline). Compose overrides to `synthetic` |
 | `ASSETS_API_BASE_URL` | `http://127.0.0.1:8080` | Reachable assets-api URL when source is `assets-api` |
 | `GUROBI_IN_RACE` | `1` | Set `0` in production (no Gurobi license there) |
 | `PORT` | `8000` | Internal listen port behind Caddy (e.g. `8080`) |
+| `WEB_CONCURRENCY` | `1` | uvicorn worker count; safe to raise (stateless), keep `workers × ~15` DB conns under the pooler cap |
 
 **Optional / tuning:**
 
 | Env var | Default | Purpose |
 |---------|---------|---------|
-| `SMTP_HOST` | `smtp.protonmail.ch` | SMTP submission host; override only for a different relay |
+| `SMTP_HOST` | `smtp.resend.com` | SMTP submission host; override only for a different relay |
 | `SMTP_PORT` | `587` | SMTP submission port |
 | `SMTP_STARTTLS` | `true` | STARTTLS on; set `false` only for a plaintext local relay |
 | `DWAVE_API_TOKEN` | unset | Enables the QPU competitor. Unset → SA-only |
@@ -140,7 +141,7 @@ secret store, **never** in git or the image.
 - [ ] TLS in front of the backend (keys flow on every request — §4).
 - [ ] Server secrets (`SMTP_PASSWORD`, `DWAVE_API_TOKEN`, DB creds) in a secret
       manager, not in the image or compose file.
-- [ ] `EMAIL_FROM` (`noreply@quip.network`) sends via Proton SMTP; test that a real
+- [ ] `EMAIL_FROM` (`noreply@quip.network`) sends via Resend SMTP; test that a real
       client inbox receives the key.
 - [ ] `GUROBI_IN_RACE=0` in prod (no license deployed).
 - [ ] Decide on **key rotation** — there is currently no rotation/revocation

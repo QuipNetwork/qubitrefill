@@ -27,14 +27,14 @@ services:
       DATABASE_URL: postgresql+asyncpg://qtw:qtw@db:5432/qtw
       MARKET_DATA_SOURCE: synthetic
       GUROBI_IN_RACE: "0"
-      # Optional: set SMTP_USERNAME + SMTP_PASSWORD (a Proton SMTP token) in the
+      # Optional: set SMTP_USERNAME + SMTP_PASSWORD (a Resend API key) in the
       # host env to email API keys for real; unset → the console sender logs the
       # key to the backend container logs.
-      SMTP_HOST: ${SMTP_HOST:-smtp.protonmail.ch}
+      SMTP_HOST: ${SMTP_HOST:-smtp.resend.com}
       SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_USERNAME: ${SMTP_USERNAME:-resend}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      EMAIL_FROM: ${EMAIL_FROM:-Qubitrefill <onboarding@protonmail.com>}
+      EMAIL_FROM: ${EMAIL_FROM:-Qubitrefill <noreply@quip.network>}
     ports:
       - "8000:8000"
     healthcheck:

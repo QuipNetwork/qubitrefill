@@ -136,16 +136,16 @@ DATABASE_URL: str = os.environ.get(
 )
 
 # -----------------------------------------------------------------------------
-# Email (Proton SMTP) — registration delivers the agent's API key out-of-band
+# Email (Resend SMTP) — registration delivers the agent's API key out-of-band
 # -----------------------------------------------------------------------------
 
-# Proton's SMTP submission endpoint (smtp.protonmail.ch:587, STARTTLS). The
-# username is the Proton address and the password is an SMTP token generated in
-# the Proton account settings. When SMTP_PASSWORD is unset the sender falls back
-# to a console logger (dev/offline).
-SMTP_HOST: str = os.environ.get("SMTP_HOST", "smtp.protonmail.ch")
+# Resend's SMTP relay (smtp.resend.com:587, STARTTLS). The username is the
+# literal "resend" and the password is a Resend API key. The EMAIL_FROM domain
+# (quip.network) must be a verified sending domain in Resend. When SMTP_PASSWORD
+# is unset the sender falls back to a console logger (dev/offline).
+SMTP_HOST: str = os.environ.get("SMTP_HOST", "smtp.resend.com")
 SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "")
+SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "resend")
 SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
 SMTP_STARTTLS: bool = os.environ.get("SMTP_STARTTLS", "true").lower() != "false"
 EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "Qubitrefill <noreply@quip.network>")
