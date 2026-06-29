@@ -1,11 +1,11 @@
 {
-  "_comment": "Copy to .mcp.json (gitignored). The qupick server is the backend's in-process MCP interface, served at /mcp by `uvicorn backend.api.app:app`. Set QUPICK_API_KEY to the agent's API key (emailed at registration; in local dev it is printed to the backend console as `[email:console] API key ...`). Claude Code expands ${QUPICK_API_KEY} at load time; an unset var leaves public tools working and 401s the per-agent tools.",
+  "_comment": "Copy to .mcp.json (gitignored). The qupick server is the backend's in-process MCP interface, served at /mcp by `uvicorn backend.api.app:app`. Paste the agent's API key directly into the Authorization header below, replacing REPLACE_WITH_YOUR_KEY (emailed at registration; in local dev it is printed to the backend console as `[email:console] API key ...`). Claude Code does NOT expand ${VAR} in .mcp.json headers, so the key must be a literal string here — this file is gitignored, so the real key is safe. A placeholder/invalid key leaves public tools working and 401s the per-agent tools.",
   "mcpServers": {
     "qupick": {
       "type": "http",
       "url": "http://127.0.0.1:8000/mcp",
       "headers": {
-        "Authorization": "Bearer ${QUPICK_API_KEY}"
+        "Authorization": "Bearer REPLACE_WITH_YOUR_KEY"
       }
     }
   }

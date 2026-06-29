@@ -24,7 +24,10 @@ backend yourself. Five steps from clone to first run:
    address, and both `name` and `email` must be unique on the server.
 
 3. **Point Claude Code at the hosted MCP server.** Copy the example and set the `url` to the hosted
-   endpoint:
+   endpoint. The API key goes **directly in the `Authorization` header** — Claude Code does **not**
+   expand `${VAR}` in `.mcp.json` headers, so an environment variable won't reach the server. You have
+   no key yet, so leave a placeholder for now (`.mcp.json` is gitignored, so the real key is safe here
+   later):
 
    ```bash
    cp .mcp.json.example .mcp.json
@@ -33,22 +36,24 @@ backend yourself. Five steps from clone to first run:
    ```json
    { "mcpServers": { "qupick": { "type": "http",
      "url": "https://qupick.quip.network/mcp",
-     "headers": { "Authorization": "Bearer ${QUPICK_API_KEY}" } } } }
+     "headers": { "Authorization": "Bearer REPLACE_WITH_YOUR_KEY" } } } }
    ```
 
-4. **Register to get your API key.** On first run you have no key yet — leave `QUPICK_API_KEY` unset,
-   start Claude Code, and ask the agent to proceed. It calls the public `register_agent` tool with
-   your `config.defaults` (name, email, sliders); the server **emails your API key** to that address
-   (it is never shown in the response). A repeat name or email returns `409 already registered`.
+4. **Register to get your API key.** With the placeholder still in place, start Claude Code and ask
+   the agent to proceed. `register_agent` is a **public** tool — it works without a valid key — and it
+   is called with your `config.defaults` (name, email, sliders); the server **emails your API key** to
+   that address (it is never shown in the response). A repeat name or email returns `409 already
+   registered`.
 
-5. **Set the key and reconnect.** Put the emailed key in your environment, then reload the server with
-   `/mcp` inside Claude Code:
+5. **Paste the key and reconnect.** Put the emailed key into `.mcp.json`, replacing the placeholder in
+   the `Authorization` header:
 
-   ```bash
-   export QUPICK_API_KEY=<key-from-email>
+   ```json
+   "headers": { "Authorization": "Bearer <key-from-email>" }
    ```
 
-   The per-agent `mcp__qupick__*` tools now authenticate and the agent runs its first `optimize`.
+   Then reload the server with `/mcp` inside Claude Code. The per-agent `mcp__qupick__*` tools now
+   authenticate and the agent runs its first `optimize`.
 
 That's it — continue to [Use it](#use-it). To run the backend yourself instead of using the hosted
 server, see [Development](#development).
@@ -91,7 +96,7 @@ cp skills/qupick/config.example.json skills/qupick/config.json
 ```
 
 `config.json` is gitignored (it holds your real email). Identity is **not** in the config — the
-agent's API key lives in the `QUPICK_API_KEY` environment variable (see
+agent's API key lives in the `.mcp.json` `Authorization` header (see
 [Register & set up](#register--set-up-hosted)). Fields:
 
 | Field | Purpose |
@@ -190,7 +195,7 @@ The skill then runs the flow from `SKILL.md`:
    methods live.
 2. **Check + seed agent (MCP)** — `ping_backend`; if the qupick tools are missing, offer to start the
    server. Then `get_agent` (success → reuse the basket), or `register_agent` from `config.defaults`
-   → set `QUPICK_API_KEY` from the emailed/console key, reconnect MCP, then `optimize` for the first solve.
+   → put the emailed/console key in `.mcp.json`'s `Authorization` header, reconnect MCP, then `optimize` for the first solve.
 3. **Pick product (MCP)** — `search-products` → `product-details` for price + accepted
    `payment_methods`; `denomination.policy` auto-selects the package.
 4. **Market (MCP)** — `get_market` for per-asset μ, units, USD value.
@@ -261,14 +266,14 @@ but the MCP tools only appear after you **reconnect the server** (run `/mcp` in 
 > once — subsequent solves are sub-10ms.
 
 **Point `.mcp.json` at the local server** — same as the [hosted setup](#register--set-up-hosted),
-but with the local URL:
+but with the local URL (the key still goes directly in the header, not via an environment variable):
 
 ```json
 { "mcpServers": { "qupick": { "type": "http", "url": "http://127.0.0.1:8000/mcp",
-  "headers": { "Authorization": "Bearer ${QUPICK_API_KEY}" } } } }
+  "headers": { "Authorization": "Bearer <your-key>" } } } }
 ```
 
 Registration works the same way, except a local backend with no `SMTP_PASSWORD` set does **not** send
 email — instead the key is printed to the backend console as
-`[email:console] API key for … : <key>` (`docker compose logs backend`). Set `QUPICK_API_KEY` to that
-value and reconnect (`/mcp`).
+`[email:console] API key for … : <key>` (`docker compose logs backend`). Paste that value into
+`.mcp.json`'s `Authorization` header and reconnect (`/mcp`).

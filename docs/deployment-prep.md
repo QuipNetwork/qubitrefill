@@ -33,7 +33,7 @@ Locked choices that the rest of this doc assumes:
 | **Backend** | FastAPI app (`backend.api.app:app`) serving REST + the `/mcp` transport on port `8000` | Containerized (`backend/Dockerfile`); this is the qupick MCP server |
 | **PostgreSQL** | Holds agents (the API keys) and jobs | The `db` service in `docker-compose.yml` is dev-grade only |
 | **assets-api** | External market-data price service (REST, SQLite-backed) | Separate service; only needed when `MARKET_DATA_SOURCE=assets-api` |
-| **qupick skill + client** | Claude Code side that calls the MCP server and Bitrefill | Needs `QUPICK_API_KEY` and `BITREFILL_API_KEY` |
+| **qupick skill + client** | Claude Code side that calls the MCP server and Bitrefill | Needs the agent's qupick API key (in the `.mcp.json` Bearer header) and `BITREFILL_API_KEY` |
 
 The `docker-compose.yml` in the repo is a **dev stack** (weak Postgres password,
 `MARKET_DATA_SOURCE: synthetic`, console email). Treat it as a reference, not a
@@ -68,7 +68,7 @@ backend.
 | Service | Why it's needed | What to obtain | Cost / gotchas |
 |---------|-----------------|----------------|----------------|
 | **Bitrefill** (https://www.bitrefill.com) | The qupick purchase flow buys gift cards / settles invoices via the bitrefill skill | An account API key (`BITREFILL_API_KEY`) and a **funded, low-balance** account/wallet | Real money. Use a dedicated low-balance account. Local-only — never commit, never set server-side. |
-| **A registered qupick agent** | Per-agent MCP tools authenticate with its key | `QUPICK_API_KEY` (emailed at registration by the backend) | Stored client-side in `.mcp.json` / env, not on the server. |
+| **A registered qupick agent** | Per-agent MCP tools authenticate with its key | The agent's API key (emailed at registration by the backend) | Pasted literally into the `.mcp.json` Bearer header client-side (gitignored), not stored on the server. |
 
 ---
 
@@ -107,7 +107,7 @@ secret store, **never** in git or the image.
 
 | Env var | Used by | Notes |
 |---------|---------|-------|
-| `QUPICK_API_KEY` | `.mcp.json` Bearer header → per-agent MCP tools | The agent's key, emailed at registration. Unset → public tools work, per-agent tools 401 |
+| `QUPICK_API_KEY` | `backend/scripts/mcp_smoke.py` only (authed-call check) | The agent's key, emailed at registration. **`.mcp.json` does not read this var** — paste the key literally into its Bearer header (Claude Code doesn't expand `${VAR}` in headers). A placeholder/invalid key → public tools work, per-agent tools 401 |
 | `BITREFILL_API_KEY` | the bitrefill skill (`Authorization: Bearer`) | Funds the purchase flow |
 
 ---

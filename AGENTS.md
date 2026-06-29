@@ -56,7 +56,7 @@ Vendored at [`skills/qupick/SKILL.md`](skills/qupick/SKILL.md). Delegates purcha
 
 **Triggers:** "pay with my worst performer", "use my worst crypto to buy X".
 
-**Requires:** the **qupick MCP server** — the portfolio backend served at `http://127.0.0.1:8000/mcp`, exposing `mcp__qupick__*` tools. The backend must be up when the session starts for the tools to register; if they are missing the skill offers to start it backgrounded with `MARKET_DATA_SOURCE = config.backend.marketDataSource` (default `synthetic`) and then has the user reconnect MCP (`/mcp`). Also a local `skills/qupick/config.json` (copy of the committed `config.example.json`; gitignored because it holds the real email), and `QUPICK_API_KEY` set to the agent's key (emailed at registration; `.mcp.json` passes it as the Bearer header). Without the config the skill falls back to fully-interactive, on-chain-only behaviour.
+**Requires:** the **qupick MCP server** — the portfolio backend served at `http://127.0.0.1:8000/mcp`, exposing `mcp__qupick__*` tools. The backend must be up when the session starts for the tools to register; if they are missing the skill offers to start it backgrounded with `MARKET_DATA_SOURCE = config.backend.marketDataSource` (default `synthetic`) and then has the user reconnect MCP (`/mcp`). Also a local `skills/qupick/config.json` (copy of the committed `config.example.json`; gitignored because it holds the real email), and the agent's API key pasted **directly** into the `.mcp.json` `Authorization: Bearer` header (emailed at registration; Claude Code does not expand `${VAR}` in `.mcp.json` headers, so a literal key is required). Without the config the skill falls back to fully-interactive, on-chain-only behaviour.
 
 **Selection vs settlement.** The skill always computes the worst performer — `min(μ)` over held crypto that Bitrefill accepts (`mcp__qupick__get_market`, static `PAYMENT_METHOD_MAP`). Selection is never bypassed by funding. It then resolves `config.funding.priority` against live balances (`GET /accounts/balance`) and on-chain holdings, settling against the first source that covers `price × (1 + fee_buffer_pct/100)`:
 
@@ -68,7 +68,7 @@ On shortfall (`funding.on_shortfall`): `reject` stops; `confirm` warns and waits
 
 **Single human stop.** The flow is built to pause in exactly one place — the purchase approval. `mcp__bitrefill__buy-products` is deliberately kept off the `.claude/settings.local.json` allowlist. The six `mcp__qupick__*` tools are allowlisted (none spend real money), and the only `curl` is the read-only `/v2/accounts/balance` endpoint (write the URL first so prefix matching works). A purchase via `curl POST /v2/invoices` is **not** allowlisted and still prompts.
 
-**Agent (re)use:** seeds over the Bitrefill-payable currencies (BTC, ETH, BNB, SOL, XRP, USDT, USDC, DOGE, ZEC, ALGO, FIL) via `mcp__qupick__register_agent` + `mcp__qupick__optimize`, or re-uses the existing agent — `get_agent` succeeding (with the configured `QUPICK_API_KEY`) means skip creation.
+**Agent (re)use:** seeds over the Bitrefill-payable currencies (BTC, ETH, BNB, SOL, XRP, USDT, USDC, DOGE, ZEC, ALGO, FIL) via `mcp__qupick__register_agent` + `mcp__qupick__optimize`, or re-uses the existing agent — `get_agent` succeeding (with the key configured in the `.mcp.json` Bearer header) means skip creation.
 
 #### `mcp__qupick__get_market`
 

@@ -32,8 +32,9 @@ or a deployed HTTPS endpoint such as `https://qupick.quip.network/mcp`. Drive it
 | `mcp__qupick__get_leaderboard` | scoreboard (public) |
 
 **Auth.** Every per-agent tool (`get_agent`, `optimize`, `get_market`) carries the agent's API
-key as `Authorization: Bearer <key>`, configured once in `.mcp.json`
-(`"Authorization": "Bearer ${QUPICK_API_KEY}"`). Set `QUPICK_API_KEY` to the key from
+key as `Authorization: Bearer <key>`, configured once in `.mcp.json` by pasting the key **literally**
+into the header (`"Authorization": "Bearer <key>"`). Claude Code does **not** expand `${VAR}` in
+`.mcp.json` headers, so an environment variable won't reach the server — use the literal key from
 registration (see step 2). The public tools work without it.
 
 The only `curl` left in this flow is the read-only Bitrefill balance endpoint (step 5b):
@@ -50,8 +51,8 @@ step 6 always fires.
 
 MCP server: `qupick` (the backend's `/mcp` transport — local `http://127.0.0.1:8000/mcp` or the
 deployed URL configured in `.mcp.json`). Tools return JSON; a failed
-per-agent call surfaces the backend's `{"detail": "..."}` (e.g. `401` when `QUPICK_API_KEY` is
-unset/wrong, `422` on validation, `503` on no feasible solution).
+per-agent call surfaces the backend's `{"detail": "..."}` (e.g. `401` when the `.mcp.json` Bearer key
+is unset/wrong, `422` on validation, `503` on no feasible solution).
 
 ### `register_agent` — create agent (public)
 
@@ -93,7 +94,7 @@ In local dev (no `SMTP_PASSWORD` on the backend) the key is **printed to the bac
 
 **Returns** (`AgentConfig`): name, handle, email, `sliders`, and the current `assets` basket. Use
 it to retrieve the basket when re-using an agent — and as the **"am I registered?" probe**: a
-success means the configured key is valid; a 401 means register (or set `QUPICK_API_KEY`) first.
+success means the configured key is valid; a 401 means register (or paste the key into `.mcp.json`) first.
 
 ### `optimize` — optimise (and optionally retune) (authed)
 
@@ -199,9 +200,9 @@ Load `skills/qupick/config.json` (mirror of the committed `config.example.json`)
 }
 ```
 
-- Identity is **not** in `config.json`. The agent's API key lives in `QUPICK_API_KEY` (read by
-  `.mcp.json` as the `Authorization: Bearer` header). "Already registered?" is answered by
-  `get_agent` succeeding, not by a stored id.
+- Identity is **not** in `config.json`. The agent's API key lives **directly** in the `.mcp.json`
+  `Authorization: Bearer` header (Claude Code does not expand `${VAR}` there). "Already registered?"
+  is answered by `get_agent` succeeding, not by a stored id.
 - `defaults` — name / email / country / sliders, used only when creating a new agent and for product country.
 - `funding.priority` — settlement order (see step 5). `funding.fee_buffer_pct` — coverage buffer (default 2). `funding.on_shortfall` — `reject` | `confirm`.
 - `denomination.policy` — `smallest_gte` auto-picks the smallest package ≥ the requested amount.
@@ -249,11 +250,12 @@ The deployed server is remote and always-on — there is nothing to start, so a 
 situation there is a **wiring** problem, not a down-server problem. Deployed wiring:
 
 ```jsonc
-// .mcp.json — point qupick at the deployed server; the key travels as the Bearer header
+// .mcp.json — point qupick at the deployed server; paste the key literally into the Bearer header
+// (Claude Code does NOT expand ${VAR} in .mcp.json headers; this file is gitignored, so it is safe)
 { "mcpServers": { "qupick": {
     "type": "http",
     "url": "https://qupick.quip.network/mcp",
-    "headers": { "Authorization": "Bearer ${QUPICK_API_KEY}" } } } }
+    "headers": { "Authorization": "Bearer <key>" } } } }
 ```
 
 **Server up?** The qupick MCP server rides on the backend over HTTP, so it must be reachable
@@ -261,8 +263,8 @@ situation there is a **wiring** problem, not a down-server problem. Deployed wir
 
 - **Tools present:** call `mcp__qupick__ping_backend` → `{"ok": true}` and proceed.
 - **Tools missing — deployed target:** the `.mcp.json` `qupick` entry is absent or its URL is wrong.
-  Wire it to the deployed `/mcp` URL with the `Authorization: Bearer ${QUPICK_API_KEY}` header
-  (above), then **reconnect the MCP server** (run `/mcp` in Claude Code) — the tools won't appear
+  Wire it to the deployed `/mcp` URL with the `Authorization: Bearer <key>` header (above, key pasted
+  literally), then **reconnect the MCP server** (run `/mcp` in Claude Code) — the tools won't appear
   mid-session otherwise. No docker compose involved; the box is managed separately.
 - **Tools missing — local target:** the local stack was down at session start. **Offer to start it**,
   and on the user's yes bring up the full stack (Postgres + backend) with docker compose from the
@@ -282,10 +284,10 @@ situation there is a **wiring** problem, not a down-server problem. Deployed wir
 
 **Already registered?** Call `mcp__qupick__get_agent`:
 
-- **Succeeds** → the configured `QUPICK_API_KEY` is valid. Read the returned `assets` basket; skip
-  creation.
-- **401** → no valid key. Either `QUPICK_API_KEY` is unset/stale, or there is no agent yet —
-  create one (below).
+- **Succeeds** → the key in the `.mcp.json` Bearer header is valid. Read the returned `assets`
+  basket; skip creation.
+- **401** → no valid key. Either the `.mcp.json` Bearer key is a placeholder/stale, or there is no
+  agent yet — create one (below).
 
 **Create.** Seed over the available Bitrefill currencies, using `config.defaults`:
 
@@ -301,8 +303,8 @@ mcp__qupick__register_agent({
 
 The API key is **emailed, not returned**. Retrieve it — from the email, or in local dev (no
 `SMTP_PASSWORD`) from the backend container logs (`docker compose logs backend`), line
-`[email:console] API key for <name> <<email>>: <key>` — then **set `QUPICK_API_KEY` to it and
-reconnect the MCP server (`/mcp`)** so the per-agent tools authenticate.
+`[email:console] API key for <name> <<email>>: <key>` — then **paste it into the `.mcp.json`
+`Authorization` header and reconnect the MCP server (`/mcp`)** so the per-agent tools authenticate.
 Once `get_agent` succeeds, optimise immediately for the first solve (no arguments):
 
 ```
@@ -436,7 +438,7 @@ mcp__qupick__optimize({
 
 > "Buy a $20 Steam gift card and dump my worst crypto"
 
-1. **Config** — `config.json` has `funding.priority = ["account_match","onchain_match","account_fiat"]`, `denomination.policy = smallest_gte`; `QUPICK_API_KEY` is set.
+1. **Config** — `config.json` has `funding.priority = ["account_match","onchain_match","account_fiat"]`, `denomination.policy = smallest_gte`; the `.mcp.json` Bearer key is set.
 2. **Currencies** — static map gives 11 tickers.
 3. **Agent** — `get_agent` succeeds → read the basket; skip creation.
 4. **Product** — `search-products("Steam", country="US")` → `steam-usa`; `product-details` → `smallest_gte($20)` picks `package_value = "20"`, price $21.60, accepts `bitcoin`/`ethereum`/`solana`/`usdc_base`.
@@ -453,7 +455,7 @@ This skill executes real-money purchases. See [`skills/bitrefill/references/safe
 - Confirm before every purchase — step 6 is the single, non-negotiable approval stop. `buy-products` is deliberately **not** on the Claude Code allowlist, so the harness also prompts.
 - Stop before `buy-products` unless the user opts into a real purchase (real money).
 - Treat codes as cash — never log or paste redemption codes in public channels.
-- Use a dedicated low-balance account. `config.json` (real email) and `QUPICK_API_KEY` (the agent's secret key) are local-only — `config.json` is gitignored and the key never goes in git.
+- Use a dedicated low-balance account. `config.json` (real email) and the API key in `.mcp.json` (the agent's secret key) are local-only — both files are gitignored, so the key never goes in git.
 - Log every purchase: `invoice_id`, product, amount, funding token, method.
 
 The retune in step 7 is irreversible — when it fires, the spent asset is removed from the basket permanently until the user re-adds it manually. It fires only when the worst performer was actually sold (`account_match` / `onchain_match`).
