@@ -347,7 +347,7 @@ The **worst performer** is `min(μ)` across these candidates. If there are no sp
 | Token | Source | Pays via | Sells it? | Retune? |
 |-------|--------|----------|--------------|---------|
 | `account_match` | Bitrefill account balance held in the worst-performing asset — **only possible when the worst performer is BTC** (account sub-accounts are limited to `XBT`/`USD`/`EUR`) | `buy-products(payment_method:"balance", balance_currency:"XBT")` | yes | yes |
-| `onchain_match` | Wallet holdings of the worst-performing asset | `buy-products(payment_method:<a rail for MAP[worst]>, return_payment_link:true)` → pay link → poll | yes | yes |
+| `onchain_match` | Wallet holdings of the worst-performing asset | `buy-products(payment_method:<a rail for MAP[worst]>, return_payment_link:true)` → pay link → auto-poll (step 6a) | yes | yes |
 | `account_fiat` | Bitrefill USD/EUR account balance | `buy-products(payment_method:"balance", balance_currency:"USD"\|"EUR")` | no | no |
 
 - `account_match` applies **only when the worst performer is BTC** — `buy-products` can debit a
@@ -387,10 +387,36 @@ the entry for multiples; `package_id` is deprecated). Balance payments settle in
 `auto_pay` flag — pick the sub-account with `balance_currency`:
 - `account_match`: `buy-products(cart_items=[{product_id, package_value}], payment_method="balance", balance_currency="XBT")` → instant.
 - `account_fiat`: `buy-products(cart_items=[{product_id, package_value}], payment_method="balance", balance_currency="USD"|"EUR")` → instant.
-- `onchain_match`: `buy-products(cart_items=[{product_id, package_value}], payment_method=<a rail for MAP[worst]>, return_payment_link=true)` → pay via the returned link → poll `get-invoice-by-id` until `status == "complete"`.
+- `onchain_match`: `buy-products(cart_items=[{product_id, package_value}], payment_method=<a rail for MAP[worst]>, return_payment_link=true)` → returns an `unpaid` invoice with a pay address / link → **auto-poll** (step 6a).
 
 Then read `get-invoice-by-id` for the delivered redemption code / PIN / QR (there is no
 `get-order-by-id` tool). Log: `invoice_id`, product, amount, chosen funding token, payment method.
+
+### 6a. Auto-poll crypto payments — no user prompts
+
+Balance settlements (`account_match` / `account_fiat`) clear instantly, so they skip this step. Any
+**conventional crypto payment** — `onchain_match`, or any `return_payment_link` path that hands back
+an `unpaid` invoice with a pay address — must be **polled automatically until it settles**, with no
+"say check to poll" round-trips:
+
+1. Show the pay address / link / amount once, so the user can broadcast the transaction.
+2. Then poll `get-invoice-by-id` on a fixed cadence — roughly **every 30 s**, automatically, without
+   waiting for the user — until the invoice reaches a terminal state. **Cap the loop at the
+   invoice's own `expiration_minutes`** (≈60 min; fall back to 60 min if the field is absent). Space
+   the polls with a wait that survives across turns (schedule the next re-check) rather than blocking
+   the session, and do **not** prompt the user between polls.
+3. **Terminal states:**
+   - `payment_confirmed` → the crypto was actually spent; the worst performer is sold. The retune
+     gate (step 7) is now satisfied — retune immediately, then keep polling for delivery.
+   - `complete` / `all_delivered` → fetch the redemption code / PIN / QR and finish.
+   - `expired`, or the cap elapses with the invoice still `unpaid` → **stop** and report that the
+     invoice expired unpaid (no sale, so **no retune** — the worst performer was never spent). Offer
+     to re-issue a fresh invoice.
+   - `partial_payment: true` → stop and surface the shortfall; do not retune. The user must top up or
+     request a refund.
+
+A user "check" / "poll" message during the window just triggers an immediate extra poll — it is
+never *required* to advance the flow.
 
 ### 7. Retune (MCP) — only if the worst performer was sold
 
