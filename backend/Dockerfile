@@ -53,10 +53,13 @@ EXPOSE 8000
 
 # Bind address is fixed (0.0.0.0); PORT is env-overridable so a reverse proxy
 # (Caddy) can front an internal port. EXPOSE documents the default.
+# WEB_CONCURRENCY sets the uvicorn worker count; the server is stateless
+# in-process, so it is safe to raise (keep workers x DB pool under the
+# Postgres pooler connection cap).
 ENV PORT=8000
 
 # Liveness via the public /healthz tool route (no DB, no auth, no extra packages).
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 \
     CMD ["sh", "-c", "python -c \"import os,urllib.request; urllib.request.urlopen('http://localhost:%s/healthz' % os.environ.get('PORT','8000'))\""]
 
-CMD ["sh", "-c", "exec uvicorn backend.api.app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
+CMD ["sh", "-c", "exec uvicorn backend.api.app:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1}"]

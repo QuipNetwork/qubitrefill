@@ -143,7 +143,8 @@ DATABASE_URL: str = os.environ.get(
 # literal string "resend" and the password is a Resend API key. Port 587 is
 # the protocol-standard STARTTLS submission port; on hosts that block it
 # (DigitalOcean blocks outbound 25/465/587), set SMTP_PORT=2587 (Resend's alt
-# STARTTLS port) in the environment. When SMTP_PASSWORD is unset the sender
+# STARTTLS port) in the environment. The EMAIL_FROM domain (quip.network) must
+# be a verified sending domain in Resend. When SMTP_PASSWORD is unset the sender
 # falls back to a console logger (dev/offline).
 SMTP_HOST: str = os.environ.get("SMTP_HOST", "smtp.resend.com")
 SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))

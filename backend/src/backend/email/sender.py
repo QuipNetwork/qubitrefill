@@ -1,7 +1,7 @@
 """Email senders for the registration API-key handoff.
 
-``get_email_sender`` is a FastAPI dependency: it returns the SMTP sender
-when ``SMTP_PASSWORD`` is configured, otherwise a console logger (dev/offline).
+``get_email_sender`` is a FastAPI dependency: it returns the SMTP sender when
+``SMTP_PASSWORD`` is configured, otherwise a console logger (dev/offline).
 Tests override the dependency with ``FakeEmailSender`` to capture the sent key
 without hitting the network.
 """
@@ -42,7 +42,7 @@ class EmailSender(Protocol):
 
 
 class SmtpEmailSender:
-    """Sends via SMTP submission (Resend: smtp.resend.com, STARTTLS)."""
+    """Sends via an SMTP relay (Resend: smtp.resend.com:587, STARTTLS)."""
 
     async def send_api_key(self, to_email: str, name: str, api_key: str) -> None:
         subject, text, html = _render(name, api_key)

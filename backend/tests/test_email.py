@@ -33,9 +33,9 @@ async def test_smtp_sender_delivers_key_over_starttls(monkeypatch):
     capture = _CapturingSend()
     monkeypatch.setattr(sender_mod.aiosmtplib, "send", capture)
     monkeypatch.setattr(config, "SMTP_HOST", "smtp.resend.com")
-    monkeypatch.setattr(config, "SMTP_PORT", 2587)
+    monkeypatch.setattr(config, "SMTP_PORT", 587)
     monkeypatch.setattr(config, "SMTP_USERNAME", "resend")
-    monkeypatch.setattr(config, "SMTP_PASSWORD", "token")
+    monkeypatch.setattr(config, "SMTP_PASSWORD", "re_token")
     monkeypatch.setattr(config, "SMTP_STARTTLS", True)
     monkeypatch.setattr(config, "EMAIL_FROM", "Qubitrefill <noreply@quip.network>")
 
@@ -46,15 +46,17 @@ async def test_smtp_sender_delivers_key_over_starttls(monkeypatch):
     assert msg["To"] == "agent@example.com"
     assert msg["From"] == "Qubitrefill <noreply@quip.network>"
     assert msg["Subject"] == "Your Qubitrefill API key"
-    assert "key-123" in msg.get_body(preferencelist=("plain",)).get_content()
+    body = msg.get_body(preferencelist=("plain",))
+    assert body is not None
+    assert "key-123" in body.get_content()
     assert capture.kwargs["hostname"] == "smtp.resend.com"
-    assert capture.kwargs["port"] == 2587
+    assert capture.kwargs["port"] == 587
     assert capture.kwargs["username"] == "resend"
-    assert capture.kwargs["password"] == "token"
+    assert capture.kwargs["password"] == "re_token"
     assert capture.kwargs["start_tls"] is True
 
 
-async def test_sender_uses_configured_username_verbatim(monkeypatch):
+async def test_smtp_sender_uses_configured_username(monkeypatch):
     # Resend requires the literal username "resend"; the sender must pass
     # SMTP_USERNAME through unchanged rather than deriving it from EMAIL_FROM.
     capture = _CapturingSend()
