@@ -136,14 +136,16 @@ DATABASE_URL: str = os.environ.get(
 )
 
 # -----------------------------------------------------------------------------
-# Email (Proton SMTP) — registration delivers the agent's API key out-of-band
+# Email (Resend SMTP) — registration delivers the agent's API key out-of-band
 # -----------------------------------------------------------------------------
 
-# Proton's SMTP submission endpoint (smtp.protonmail.ch:587, STARTTLS). The
-# username is the Proton address and the password is an SMTP token generated in
-# the Proton account settings. When SMTP_PASSWORD is unset the sender falls back
-# to a console logger (dev/offline).
-SMTP_HOST: str = os.environ.get("SMTP_HOST", "smtp.protonmail.ch")
+# Resend's SMTP submission endpoint (smtp.resend.com). The username is the
+# literal string "resend" and the password is a Resend API key. Port 587 is
+# the protocol-standard STARTTLS submission port; on hosts that block it
+# (DigitalOcean blocks outbound 25/465/587), set SMTP_PORT=2587 (Resend's alt
+# STARTTLS port) in the environment. When SMTP_PASSWORD is unset the sender
+# falls back to a console logger (dev/offline).
+SMTP_HOST: str = os.environ.get("SMTP_HOST", "smtp.resend.com")
 SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "")
 SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")

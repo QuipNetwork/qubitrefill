@@ -8,7 +8,7 @@ agent's 8-char id is handed out freely (in `SubmitAgentResponse`, `qrUrl`, the l
 per-agent WS path). We want to gate the API behind a per-user key and persist data durably.
 
 The change makes the **agent uuid a secret API key**: you register with a unique email + name,
-receive the uuid by email (Proton SMTP), and must send it as `Authorization: Bearer <uuid>` on every
+receive the uuid by email (Resend SMTP), and must send it as `Authorization: Bearer <uuid>` on every
 other request. Because the uuid is now secret, it must disappear from all public surfaces.
 
 ### Locked decisions
@@ -16,7 +16,7 @@ other request. Because the uuid is now secret, it must disappear from all public
 - **Routes:** derive the agent from the Bearer token — **drop `{agent_id}` from URLs** (key never in a URL/log).
 - **Public identity:** use the **unique `name`/`handle`** (no separate public id) for leaderboard, TV, and WS.
 - **WebSockets:** **public-by-design** — subscribe by `name`/`handle`, no key required (keeps the booth display working).
-- **Email:** **Proton SMTP** submission (`smtp.protonmail.ch:587`, STARTTLS) via `aiosmtplib`.
+- **Email:** **Resend SMTP** submission (`smtp.resend.com`, STARTTLS) via `aiosmtplib`.
 - **Registration response is email-only** — never returns the key; `qrUrl` is dropped (it embedded the secret id).
 
 ## 1. Infra & dependencies
@@ -27,8 +27,9 @@ other request. Because the uuid is now secret, it must disappear from all public
   `pydantic[email]` (for `EmailStr`), `aiosmtplib>=3.0` (async SMTP).
 - **`backend/src/backend/config.py`** new env-backed settings: `DATABASE_URL`
   (default `postgresql+asyncpg://qtw:qtw@127.0.0.1:5432/qtw`), `SMTP_HOST`
-  (default `smtp.protonmail.ch`), `SMTP_PORT` (default `587`), `SMTP_USERNAME`, `SMTP_PASSWORD`,
-  `SMTP_STARTTLS` (default `true`), `EMAIL_FROM` (default `Qubitrefill <onboarding@protonmail.com>`).
+  (default `smtp.resend.com`), `SMTP_PORT` (default `587`; `2587` on DigitalOcean), `SMTP_USERNAME`
+  (literal `resend`), `SMTP_PASSWORD` (Resend API key), `SMTP_STARTTLS` (default `true`),
+  `EMAIL_FROM` (default `Qubitrefill <noreply@quip.network>`).
 
 ## 2. DB layer — new `backend/src/backend/db/`
 
@@ -71,7 +72,7 @@ call run via `asyncio.to_thread`. Async sessions can't be used from that worker 
   `sliders`, `assets?`, `reach_out?`, `updates_opt_in?`.
 - Handler (async, uses `AgentRepo` + `get_session`): validate basket (`financial/basket.validate_basket`);
   reject duplicate email or name → **409** (DB unique constraints as backstop: catch `IntegrityError`);
-  `id = uuid4().hex`; create agent (`bankroll = config.BANKROLL_USD`); **send the key via Proton SMTP**;
+  `id = uuid4().hex`; create agent (`bankroll = config.BANKROLL_USD`); **send the key via Resend SMTP**;
   on send failure roll back + **502** so the user can retry (email-only delivery means a lost email = lost key).
 - New `RegistrationResponse` = `{ message: "Check your email for your API key", email, bankroll }`.
   **Remove** `SubmitAgentResponse.qr_url`/`agent_id` exposure.
@@ -102,9 +103,9 @@ call run via `asyncio.to_thread`. Async sessions can't be used from that worker 
 ## 7. Email — new `backend/src/backend/email/sender.py`
 
 - `EmailSender` protocol with `send_api_key(to_email, name, api_key)`.
-- `ProtonSmtpEmailSender`: builds a `text`+`html` `EmailMessage` and `aiosmtplib.send(...)` to
+- `SmtpEmailSender`: builds a `text`+`html` `EmailMessage` and `aiosmtplib.send(...)` to
   `SMTP_HOST:SMTP_PORT` with STARTTLS, authenticating as `SMTP_USERNAME` / `SMTP_PASSWORD`.
-- `FakeEmailSender` (tests) captures the last sent key. `get_email_sender()` factory (Proton SMTP when
+- `FakeEmailSender` (tests) captures the last sent key. `get_email_sender()` factory (SMTP when
   `SMTP_PASSWORD` set, else a console logger). Injected as a FastAPI dependency so tests override it.
 
 ## 8. Tests (`backend/tests/`)
@@ -132,7 +133,7 @@ call run via `asyncio.to_thread`. Async sessions can't be used from that worker 
 | `backend/src/backend/api/routes.py` | registration + token-derived routes |
 | `backend/src/backend/api/ws.py` | subscribe by handle/name |
 | `backend/src/backend/api/schemas.py` | RegistrationRequest/Response; LeaderboardEntry w/o agent_id |
-| `backend/src/backend/email/sender.py` | **new** — Proton SMTP + fake |
+| `backend/src/backend/email/sender.py` | **new** — SMTP sender + fake |
 | `backend/tests/*` | DB-backed fixtures; auth + uniqueness tests |
 | `backend/src/backend/cli.py` | follow-up: it uses the old sync stores — port or flag out of scope |
 
@@ -141,7 +142,7 @@ call run via `asyncio.to_thread`. Async sessions can't be used from that worker 
 1. `docker compose up -d` → Postgres healthy on 5432.
 2. `cd backend && DATABASE_URL=… SMTP_USERNAME=… SMTP_PASSWORD=… uv run uvicorn backend.api.app:app --workers 1`.
 3. **Register:** `curl -X POST /agents -d '{"name":"Demo","email":"you@x.com","sliders":{...}}'`
-   → 201 "check your email"; key arrives via Proton SMTP (or console). Re-POST same email/name → 409.
+   → 201 "check your email"; key arrives via Resend SMTP (or console). Re-POST same email/name → 409.
 4. **Auth:** call `GET /agents/me` without header → 401; with `Authorization: Bearer <key>` → 200.
    `POST /agents/optimize`, `GET /agents/market` work with the bearer.
 5. **No leak:** `GET /leaderboard` returns entries with **no** `agentId`; WS `/agents/ws/{handle}`

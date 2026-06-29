@@ -1,6 +1,6 @@
 """Email senders for the registration API-key handoff.
 
-``get_email_sender`` is a FastAPI dependency: it returns the Proton SMTP sender
+``get_email_sender`` is a FastAPI dependency: it returns the SMTP sender
 when ``SMTP_PASSWORD`` is configured, otherwise a console logger (dev/offline).
 Tests override the dependency with ``FakeEmailSender`` to capture the sent key
 without hitting the network.
@@ -42,8 +42,8 @@ class EmailSender(Protocol):
     async def send_api_key(self, to_email: str, name: str, api_key: str) -> None: ...
 
 
-class ProtonSmtpEmailSender:
-    """Sends via Proton's SMTP submission endpoint (smtp.protonmail.ch:587)."""
+class SmtpEmailSender:
+    """Sends via SMTP submission (Resend: smtp.resend.com, STARTTLS)."""
 
     async def send_api_key(self, to_email: str, name: str, api_key: str) -> None:
         subject, text, html = _render(name, api_key)
@@ -83,5 +83,5 @@ class FakeEmailSender:
 
 def get_email_sender() -> EmailSender:
     if config.SMTP_PASSWORD:
-        return ProtonSmtpEmailSender()
+        return SmtpEmailSender()
     return ConsoleEmailSender()
