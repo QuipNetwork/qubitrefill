@@ -344,6 +344,7 @@
         <p>Connect the <code>bitrefill</code> MCP, then drop <code>qupick</code> into Claude Code.</p>
         <div class="code"><span class="c">claude mcp add</span> --transport http bitrefill \
   https://api.bitrefill.com/mcp
+<span class="c">mkdir -p</span> .claude/skills
 <span class="c">cp -R</span> skills/qupick .claude/skills/</div>
       </div>
       <div class="step">
@@ -353,7 +354,7 @@
           Point <code>.mcp.json</code> at the hosted server and register once — your API key is
           emailed to you. Paste it into the <code>Authorization</code> header and reconnect.
         </p>
-        <div class="code"><span class="c">url</span>   qupick.quip.network/mcp
+        <div class="code"><span class="c">url</span>   https://qupick.quip.network/mcp
 <span class="c">auth</span>  Bearer &lt;key-from-email&gt;</div>
       </div>
       <div class="step">
