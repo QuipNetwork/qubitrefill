@@ -340,10 +340,10 @@
     <div class="steps">
       <div class="step">
         <span class="n">1</span>
-        <h3>Install the skills</h3>
-        <p>Add the <code>bitrefill</code> plugin from upstream, then drop <code>qupick</code> into Claude Code.</p>
-        <div class="code"><span class="c">/plugin</span> marketplace add bitrefill/agents
-<span class="c">/plugin</span> install bitrefill@bitrefill-skills
+        <h3>Connect &amp; install</h3>
+        <p>Connect the <code>bitrefill</code> MCP, then drop <code>qupick</code> into Claude Code.</p>
+        <div class="code"><span class="c">claude mcp add</span> --transport http bitrefill \
+  https://api.bitrefill.com/mcp
 <span class="c">cp -R</span> skills/qupick .claude/skills/</div>
       </div>
       <div class="step">
