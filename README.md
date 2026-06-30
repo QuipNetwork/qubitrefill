@@ -4,15 +4,16 @@ Pay for a Bitrefill product (gift card, top-up, eSIM) with the **worst-performin
 portfolio — the asset with the lowest expected return μ — then retune the portfolio without it.
 
 The agent logic lives in [`SKILL.md`](skills/qupick/SKILL.md); this README is the operator's quick-start.
-Purchase mechanics are delegated to the sibling [`bitrefill`](skills/bitrefill/SKILL.md) skill.
+Purchase mechanics are delegated to the **bitrefill** skill, installed separately from upstream (see
+[Install the skill](#install-the-skill)).
 
 ## Register & set up (hosted)
 
 The fastest path uses the **live hosted server** at `https://qupick.quip.network` — you don't run any
 backend yourself. Five steps from clone to first run:
 
-1. **Install the skill.** Install `qupick` and its sibling `bitrefill` together (see
-   [Install the skill](#install-the-skill)).
+1. **Install the skills.** Install `qupick` (this repo) and the `bitrefill` plugin (from upstream) —
+   see [Install the skill](#install-the-skill).
 
 2. **Configure your defaults.** Copy the example and fill it in (see [Configure](#configure)):
 
@@ -63,8 +64,10 @@ server, see [Development](#development).
 - The **qupick MCP server** — the portfolio backend, registered via `.mcp.json` and exposing
   `mcp__qupick__*` tools. Use the hosted server at `https://qupick.quip.network/mcp` (above) or run
   it locally at `http://127.0.0.1:8000/mcp` (see [Development](#development)).
-- The **Bitrefill MCP** connected (`https://api.bitrefill.com/mcp`, OAuth or API key), or the
-  Bitrefill REST API key — used for product search, balance reads, and invoice creation.
+- The **bitrefill skill + Bitrefill MCP**, installed from upstream via
+  `/plugin install bitrefill@bitrefill-skills` (see [Install the skill](#install-the-skill)). The MCP
+  (`https://api.bitrefill.com/mcp`, OAuth or API key) drives product search, balance reads, and
+  invoice creation; the Bitrefill REST API key is an alternative for the balance probe.
 - A funding source the waterfall can draw on: a pre-funded **Bitrefill account balance** (USD, EUR,
   and/or the worst-performing asset) and/or a funded on-chain wallet for that asset. The funding order is
   configurable (see [Configure](#configure)).
@@ -74,14 +77,25 @@ server, see [Development](#development).
 
 ## Install the skill
 
-Claude Code discovers skills under `.claude/skills/`. Because `qupick` links the bitrefill
-skill via the relative path `../bitrefill/SKILL.md`, install **both** as siblings:
+This repo ships the **qupick** skill. Its purchase layer — the **bitrefill** skill — is **not**
+vendored here; install it from upstream.
 
-```bash
-mkdir -p .claude/skills
-cp -R skills/qupick .claude/skills/
-cp -R skills/bitrefill     .claude/skills/
-```
+1. **bitrefill (upstream plugin).** Registers the skill and its eCommerce MCP in one step:
+
+   ```
+   /plugin marketplace add bitrefill/agents
+   /plugin install bitrefill@bitrefill-skills
+   /reload-plugins
+   ```
+
+   Upstream: <https://github.com/bitrefill/agents>. Authenticate via OAuth or API key on first use.
+
+2. **qupick (this repo).** Claude Code discovers skills under `.claude/skills/`:
+
+   ```bash
+   mkdir -p .claude/skills
+   cp -R skills/qupick .claude/skills/
+   ```
 
 `.claude/` is gitignored — the skill install is local, not committed. The one tracked exception is
 `backend/.claude/settings.json`, the shared permission allowlist (see
@@ -230,7 +244,8 @@ Retune:   drop BTC, re-optimize over the remaining 10 currencies
 
 - The agent **never buys without explicit approval** — it always pauses at step 6.
 - Codes deliver instantly and are **non-refundable**; treat redemption codes as cash and redeem ASAP.
-- Use a dedicated, low-balance wallet. Full policy: [`safeguards.md`](skills/bitrefill/references/safeguards.md).
+- Use a dedicated, low-balance wallet. Full policy: the bitrefill skill's `safeguards.md` (installed
+  with the plugin).
 - The step-7 retune is irreversible — the spent asset leaves the basket until you re-add it.
 
 ## Development

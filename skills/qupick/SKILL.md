@@ -1,7 +1,7 @@
 ---
 name: qupick
 description: "This skill uses quantum computers to pick the best crypto asset to pay with, given current market conditions."
-compatibility: "Requires: (1) the qupick MCP server (the portfolio backend's /mcp transport) wired into .mcp.json as an HTTP MCP — local dev http://127.0.0.1:8000/mcp or a deployed instance such as https://qupick.quip.network/mcp — exposing mcp__qupick__* tools; (2) Bitrefill MCP (https://api.bitrefill.com/mcp) or CLI available; (3) a local skills/qupick/config.json (see config.example.json). Delegates all purchase mechanics to the bitrefill skill."
+compatibility: "Requires: (1) the qupick MCP server (the portfolio backend's /mcp transport) wired into .mcp.json as an HTTP MCP — local dev http://127.0.0.1:8000/mcp or a deployed instance such as https://qupick.quip.network/mcp — exposing mcp__qupick__* tools; (2) the bitrefill skill + its Bitrefill MCP (https://api.bitrefill.com/mcp), installed separately via /plugin install bitrefill@bitrefill-skills; (3) a local skills/qupick/config.json (see config.example.json). Delegates all purchase mechanics to the bitrefill skill."
 metadata:
   author: hackathon
   version: "5.3.0"
@@ -11,7 +11,7 @@ metadata:
 
 Identify the most suitable crypto in the portfolio (lowest annualised expected return) using a quantum unconstrained binary optimization, settle a Bitrefill product against the cheapest available funding source, then retune the portfolio only if the chosen crypto was actually sold.
 
-Delegates all purchase mechanics to the [`bitrefill`](../bitrefill/SKILL.md) skill — read and invoke that skill for product search, pricing, buying, and payment polling. This skill adds portfolio seeding, selection logic, and an account-aware funding waterfall on top.
+Delegates all purchase mechanics to the **bitrefill** skill — install it separately (`/plugin marketplace add bitrefill/agents` → `/plugin install bitrefill@bitrefill-skills` → `/reload-plugins`; upstream <https://github.com/bitrefill/agents>), then read and invoke it for product search, pricing, buying, and payment polling. This skill adds portfolio seeding, selection logic, and an account-aware funding waterfall on top.
 
 The flow is designed to stop for the user in **exactly one** place — the purchase approval (step 6). Defaults, a config file, and a permission allowlist remove the other interruptions.
 
@@ -454,7 +454,7 @@ mcp__qupick__optimize({
 
 ## Safeguards
 
-This skill executes real-money purchases. See [`skills/bitrefill/references/safeguards.md`](../bitrefill/references/safeguards.md) for the full spending policy:
+This skill executes real-money purchases. The bitrefill skill carries the full spending policy; the essentials:
 - Confirm before every purchase — step 6 is the single, non-negotiable approval stop. `buy-products` is deliberately **not** on the Claude Code allowlist, so the harness also prompts.
 - Stop before `buy-products` unless the user opts into a real purchase (real money).
 - Treat codes as cash — never log or paste redemption codes in public channels.
