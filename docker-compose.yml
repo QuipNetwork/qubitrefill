@@ -35,6 +35,11 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME:-resend}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       EMAIL_FROM: ${EMAIL_FROM:-Qubitrefill <noreply@quip.network>}
+      # Registration digest — daily contact-list email to the team. Defaults to
+      # the BD alias; set DIGEST_RECIPIENTS="" to disable (fail-closed). Also
+      # inert without SMTP_PASSWORD, so it can never fall back to logging the list.
+      DIGEST_RECIPIENTS: ${DIGEST_RECIPIENTS-bd@postquant.xyz}
+      DIGEST_HOUR_UTC: ${DIGEST_HOUR_UTC:-7}
     ports:
       - "8000:8000"
     healthcheck:

@@ -279,6 +279,57 @@ def cmd_verify_dwave(args: argparse.Namespace) -> None:
         )
 
 
+def cmd_send_digest(args: argparse.Namespace) -> None:
+    """Build and send the registration digest now (bypasses the daily schedule).
+
+    ``--dry-run`` renders the summary + CSV to stdout without sending — use it to
+    verify the payload when SMTP is not configured. A real send requires both
+    ``DIGEST_RECIPIENTS`` and ``SMTP_PASSWORD``.
+    """
+    import asyncio
+
+    asyncio.run(_send_digest_async(args.dry_run))
+
+
+async def _send_digest_async(dry_run: bool) -> None:
+    from datetime import UTC, datetime
+
+    from .db.engine import get_engine, init_engine, session_scope
+    from .db.models import Base, DigestState
+    from .email.sender import get_email_sender
+    from .orchestration import digest_scheduler
+    from .reporting import registrations
+
+    init_engine()
+    async with get_engine().begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    now = datetime.now(UTC)
+    today = now.date().isoformat()
+    async with session_scope() as session:
+        rows = await registrations.fetch_rows(session)
+        state = await session.get(DigestState, 1)
+        since = state.last_sent_at if state else None
+        stats = registrations.compute_stats(rows, since)
+        subject, text, _ = registrations.render(stats, today)
+
+        if dry_run:
+            print(f"[dry-run] would send to: {config.DIGEST_RECIPIENTS or '(none set)'}")
+            print(f"[dry-run] subject: {subject}\n")
+            print(text)
+            print(f"\n--- registrations-{today}.csv ---")
+            print(registrations.rows_to_csv(rows), end="")
+            return
+
+        if not config.DIGEST_RECIPIENTS:
+            raise SystemExit("DIGEST_RECIPIENTS is empty — set it (or use --dry-run)")
+        if not config.SMTP_PASSWORD:
+            raise SystemExit("SMTP is not configured — set SMTP_PASSWORD (or use --dry-run)")
+
+        sent = await digest_scheduler.send_now(session, get_email_sender(), now)
+    print(f"sent registration digest ({sent.total} registrants) to {config.DIGEST_RECIPIENTS}")
+
+
 def _print_speedup(winner, results, winner_label) -> None:
     if winner is None or winner.solve_time_s <= 0:
         return
@@ -319,6 +370,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     _add_common_args(p_verify)
     p_verify.set_defaults(func=cmd_verify_dwave)
+
+    p_digest = sub.add_parser("send-digest", help="send the registration digest now")
+    p_digest.add_argument("--dry-run", action="store_true", help="render without sending")
+    p_digest.set_defaults(func=cmd_send_digest)
 
     args = parser.parse_args(argv)
     try:

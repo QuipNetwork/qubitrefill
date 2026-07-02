@@ -42,7 +42,9 @@ async def _init_db():
 async def isolated_state():
     """Truncate tables and pin a fixed-clock market so pipeline math is reproducible."""
     async with session_scope() as session:
-        await session.execute(text("TRUNCATE jobs, agents RESTART IDENTITY CASCADE"))
+        await session.execute(
+            text("TRUNCATE jobs, agents, digest_state RESTART IDENTITY CASCADE")
+        )
         await session.commit()
     set_source(SyntheticMarketSource(clock=lambda: 1000.0))
     yield

@@ -152,3 +152,23 @@ SMTP_USERNAME: str = os.environ.get("SMTP_USERNAME", "resend")
 SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
 SMTP_STARTTLS: bool = os.environ.get("SMTP_STARTTLS", "true").lower() != "false"
 EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "Qubitrefill <noreply@quip.network>")
+
+# -----------------------------------------------------------------------------
+# Registration digest — a daily email of the registered-contact list to the team
+# -----------------------------------------------------------------------------
+
+# Comma-separated recipient addresses. EMPTY ⇒ the digest is disabled (fail-closed):
+# the scheduler never runs and no PII leaves the DB. The digest also stays inert
+# unless SMTP_PASSWORD is set, so it can never fall back to logging the list.
+# The library default is empty; the deployment default (bd@postquant.xyz) is set
+# in docker-compose.yml.
+DIGEST_RECIPIENTS: list[str] = [
+    addr.strip() for addr in os.environ.get("DIGEST_RECIPIENTS", "").split(",") if addr.strip()
+]
+# Hour of day (UTC) at/after which the daily digest may send. The scheduler wakes
+# hourly and sends the first time it is past this hour with no send recorded today.
+# Validated fail-fast: an out-of-range value would silently never fire (the guard
+# is ``now.hour < DIGEST_HOUR_UTC``), so reject it at startup instead.
+DIGEST_HOUR_UTC: int = int(os.environ.get("DIGEST_HOUR_UTC", "7"))
+if not 0 <= DIGEST_HOUR_UTC <= 23:
+    raise ValueError(f"DIGEST_HOUR_UTC must be 0–23, got {DIGEST_HOUR_UTC}")

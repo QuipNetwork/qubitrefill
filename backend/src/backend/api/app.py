@@ -19,6 +19,7 @@ from fastapi_mcp import FastApiMCP
 from .. import config
 from ..db.engine import get_engine, init_engine
 from ..db.models import Base
+from ..orchestration import digest_scheduler
 from . import routes
 from .auth import APIKeyMiddleware
 
@@ -62,7 +63,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_engine()
     async with get_engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    digest_scheduler.start(app)
     yield
+    await digest_scheduler.stop(app)
     # Note: the engine is process-wide and intentionally NOT disposed here —
     # tests share it across many app instances and own its lifecycle.
 

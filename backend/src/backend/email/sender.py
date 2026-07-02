@@ -40,6 +40,16 @@ def _render(name: str, api_key: str) -> tuple[str, str, str]:
 class EmailSender(Protocol):
     async def send_api_key(self, to_email: str, name: str, api_key: str) -> None: ...
 
+    async def send_digest(
+        self,
+        recipients: list[str],
+        subject: str,
+        text: str,
+        html: str,
+        csv_bytes: bytes,
+        csv_filename: str,
+    ) -> None: ...
+
 
 class SmtpEmailSender:
     """Sends via an SMTP relay (Resend: smtp.resend.com:587, STARTTLS)."""
@@ -62,6 +72,34 @@ class SmtpEmailSender:
             timeout=10.0,
         )
 
+    async def send_digest(
+        self,
+        recipients: list[str],
+        subject: str,
+        text: str,
+        html: str,
+        csv_bytes: bytes,
+        csv_filename: str,
+    ) -> None:
+        msg = EmailMessage()
+        msg["From"] = config.EMAIL_FROM
+        msg["To"] = ", ".join(recipients)
+        msg["Subject"] = subject
+        msg.set_content(text)
+        msg.add_alternative(html, subtype="html")
+        msg.add_attachment(
+            csv_bytes, maintype="text", subtype="csv", filename=csv_filename
+        )
+        await aiosmtplib.send(
+            msg,
+            hostname=config.SMTP_HOST,
+            port=config.SMTP_PORT,
+            username=config.SMTP_USERNAME,
+            password=config.SMTP_PASSWORD,
+            start_tls=config.SMTP_STARTTLS,
+            timeout=30.0,
+        )
+
 
 class ConsoleEmailSender:
     """Dev fallback — logs the key instead of sending it."""
@@ -69,15 +107,53 @@ class ConsoleEmailSender:
     async def send_api_key(self, to_email: str, name: str, api_key: str) -> None:
         log.warning("[email:console] API key for %s <%s>: %s", name, to_email, api_key)
 
+    async def send_digest(
+        self,
+        recipients: list[str],
+        subject: str,
+        text: str,
+        html: str,
+        csv_bytes: bytes,
+        csv_filename: str,
+    ) -> None:
+        # Redacted: never log the contact list. The scheduler already refuses to
+        # run without real SMTP; this is a second line of defense.
+        log.warning(
+            "[email:console] digest suppressed (no SMTP): %d recipients, %d CSV bytes",
+            len(recipients),
+            len(csv_bytes),
+        )
+
 
 class FakeEmailSender:
     """Test double — records every send for assertion."""
 
     def __init__(self) -> None:
         self.sent: list[dict[str, str]] = []
+        self.digests: list[dict] = []
 
     async def send_api_key(self, to_email: str, name: str, api_key: str) -> None:
         self.sent.append({"email": to_email, "name": name, "api_key": api_key})
+
+    async def send_digest(
+        self,
+        recipients: list[str],
+        subject: str,
+        text: str,
+        html: str,
+        csv_bytes: bytes,
+        csv_filename: str,
+    ) -> None:
+        self.digests.append(
+            {
+                "recipients": recipients,
+                "subject": subject,
+                "text": text,
+                "html": html,
+                "csv": csv_bytes.decode("utf-8"),
+                "filename": csv_filename,
+            }
+        )
 
 
 def get_email_sender() -> EmailSender:
