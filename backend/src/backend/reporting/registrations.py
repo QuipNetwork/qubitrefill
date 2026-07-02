@@ -106,7 +106,10 @@ def _sanitize_cell(value: object) -> str:
         text = "; ".join(str(v) for v in value)
     else:
         text = str(value)
-    if text.startswith(_FORMULA_TRIGGERS):
+    # Spreadsheets strip leading whitespace before evaluating a cell, so a trigger
+    # hidden behind spaces/tabs (" =HYPERLINK(...)") must be quoted too — check the
+    # raw string (catches a literal leading control char) and the lstripped one.
+    if text.startswith(_FORMULA_TRIGGERS) or text.lstrip().startswith(_FORMULA_TRIGGERS):
         return "'" + text
     return text
 

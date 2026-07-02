@@ -80,6 +80,15 @@ def test_csv_injection_is_neutralized():
     assert reach_cell.startswith("'+telegram")
 
 
+def test_csv_injection_behind_leading_whitespace_is_neutralized():
+    """Spreadsheets strip leading spaces/tabs before evaluating, so a formula
+    hidden behind whitespace must still be quoted."""
+    rows = [_row(name=" =HYPERLINK(1)", reach_out=["\t+evil"])]
+    data = list(csv.reader(io.StringIO(rows_to_csv(rows))))[1]
+    assert data[CSV_COLUMNS.index("name")].startswith("'")
+    assert data[CSV_COLUMNS.index("reach_out")].startswith("'")
+
+
 def test_bool_and_none_rendering():
     rows = [_row(opt_in=True), _row(opt_in=False), _row(opt_in=None)]
     data = list(csv.reader(io.StringIO(rows_to_csv(rows))))[1:]

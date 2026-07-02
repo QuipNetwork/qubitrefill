@@ -167,4 +167,8 @@ DIGEST_RECIPIENTS: list[str] = [
 ]
 # Hour of day (UTC) at/after which the daily digest may send. The scheduler wakes
 # hourly and sends the first time it is past this hour with no send recorded today.
+# Validated fail-fast: an out-of-range value would silently never fire (the guard
+# is ``now.hour < DIGEST_HOUR_UTC``), so reject it at startup instead.
 DIGEST_HOUR_UTC: int = int(os.environ.get("DIGEST_HOUR_UTC", "7"))
+if not 0 <= DIGEST_HOUR_UTC <= 23:
+    raise ValueError(f"DIGEST_HOUR_UTC must be 0–23, got {DIGEST_HOUR_UTC}")

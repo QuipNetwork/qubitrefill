@@ -326,8 +326,8 @@ async def _send_digest_async(dry_run: bool) -> None:
         if not config.SMTP_PASSWORD:
             raise SystemExit("SMTP is not configured — set SMTP_PASSWORD (or use --dry-run)")
 
-        await digest_scheduler.send_now(session, get_email_sender(), now)
-    print(f"sent registration digest ({stats.total} registrants) to {config.DIGEST_RECIPIENTS}")
+        sent = await digest_scheduler.send_now(session, get_email_sender(), now)
+    print(f"sent registration digest ({sent.total} registrants) to {config.DIGEST_RECIPIENTS}")
 
 
 def _print_speedup(winner, results, winner_label) -> None:
