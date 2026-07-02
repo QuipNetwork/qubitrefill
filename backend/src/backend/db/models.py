@@ -40,15 +40,17 @@ class Agent(Base):
 class DigestState(Base):
     """Single-row marker for the registration digest scheduler.
 
-    Holds the calendar date (UTC, ``YYYY-MM-DD``) of the last successful send so
-    the daily digest is idempotent across restarts — the row is created on first
+    Holds the ISO-8601 UTC timestamp (``…+00:00``) of the last successful send.
+    The date prefix drives once-per-day idempotency across restarts; the full
+    timestamp is the ``new_since`` boundary, so a registrant who signs up later on
+    the send's own day is still counted next time. The row is created on first
     send and its ``id`` is always ``1``.
     """
 
     __tablename__ = "digest_state"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)  # always 1
-    last_sent_date: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    last_sent_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class Job(Base):

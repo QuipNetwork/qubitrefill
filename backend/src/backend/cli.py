@@ -309,7 +309,7 @@ async def _send_digest_async(dry_run: bool) -> None:
     async with session_scope() as session:
         rows = await registrations.fetch_rows(session)
         state = await session.get(DigestState, 1)
-        since = state.last_sent_date if state else None
+        since = state.last_sent_at if state else None
         stats = registrations.compute_stats(rows, since)
         subject, text, _ = registrations.render(stats, today)
 

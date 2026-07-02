@@ -2,8 +2,9 @@
 
 A background task started in the app lifespan wakes hourly and sends the digest
 at most once per UTC calendar day, at/after ``DIGEST_HOUR_UTC``. Idempotency is a
-one-row ``digest_state`` marker, so a restart cannot double-send (and, with a
-single web worker, neither can concurrency). The task is **fail-closed**: it does
+one-row ``digest_state`` marker guarded by a Postgres advisory lock, so neither a
+restart nor concurrent workers (``WEB_CONCURRENCY>1``) can double-send. The task
+is **fail-closed**: it does
 not even start unless both ``DIGEST_RECIPIENTS`` and real SMTP are configured, so
 the contact list can never fall through to the console logger.
 
@@ -17,6 +18,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import config
@@ -29,33 +31,46 @@ log = logging.getLogger(__name__)
 
 _POLL_INTERVAL_S = 3600  # wake hourly; the date/hour guards decide when to send
 
+# Cross-process/instance mutex for the send. A Postgres advisory lock is
+# cluster-global and transaction-scoped (auto-released on commit OR rollback), so
+# acquiring it before the guard makes the whole check→send→mark sequence atomic
+# even when WEB_CONCURRENCY>1 runs one scheduler per worker. Key is arbitrary but
+# fixed — the ASCII bytes of "DIGEST".
+_SEND_LOCK_KEY = 0x444947455354  # b"DIGEST"
+
+
+async def _acquire_send_lock(session: AsyncSession) -> None:
+    """Serialize the digest send across workers/instances until this txn ends."""
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _SEND_LOCK_KEY})
+
 
 async def _get_state(session: AsyncSession) -> DigestState:
     state = await session.get(DigestState, 1)
     if state is None:
-        state = DigestState(id=1, last_sent_date=None)
+        state = DigestState(id=1, last_sent_at=None)
         session.add(state)
     return state
 
 
 async def _build_and_send(
-    session: AsyncSession, sender: EmailSender, today: str, since_date: str | None
+    session: AsyncSession, sender: EmailSender, now: datetime, since: str | None
 ) -> registrations.RegistrationStats:
     """Fetch → stats → CSV → send → advance the marker (committed)."""
+    today = now.date().isoformat()
     rows = await registrations.fetch_rows(session)
-    stats = registrations.compute_stats(rows, since_date)
+    stats = registrations.compute_stats(rows, since)
     csv_bytes = registrations.rows_to_csv(rows).encode("utf-8")
-    subject, text, html = registrations.render(stats, today)
+    subject, body, html = registrations.render(stats, today)
     await sender.send_digest(
         recipients=config.DIGEST_RECIPIENTS,
         subject=subject,
-        text=text,
+        text=body,
         html=html,
         csv_bytes=csv_bytes,
         csv_filename=f"registrations-{today}.csv",
     )
     state = await _get_state(session)
-    state.last_sent_date = today
+    state.last_sent_at = now.isoformat()
     await session.commit()
     log.info(
         "registration digest sent: %d recipients, %d registrants (%d new)",
@@ -73,12 +88,13 @@ async def run_once(session: AsyncSession, sender: EmailSender, now: datetime) ->
     send failure is retried on the next wake.
     """
     today = now.date().isoformat()
+    await _acquire_send_lock(session)
     state = await _get_state(session)
-    if state.last_sent_date == today:
+    if state.last_sent_at is not None and state.last_sent_at[:10] == today:
         return False
     if now.hour < config.DIGEST_HOUR_UTC:
         return False
-    await _build_and_send(session, sender, today, state.last_sent_date)
+    await _build_and_send(session, sender, now, state.last_sent_at)
     return True
 
 
@@ -86,9 +102,9 @@ async def send_now(
     session: AsyncSession, sender: EmailSender, now: datetime
 ) -> registrations.RegistrationStats:
     """Force a send regardless of the schedule (CLI/ops). Still advances the marker."""
+    await _acquire_send_lock(session)
     state = await _get_state(session)
-    today = now.date().isoformat()
-    return await _build_and_send(session, sender, today, state.last_sent_date)
+    return await _build_and_send(session, sender, now, state.last_sent_at)
 
 
 def _enabled() -> tuple[bool, str]:

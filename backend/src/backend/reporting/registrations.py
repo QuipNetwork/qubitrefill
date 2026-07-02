@@ -80,20 +80,18 @@ async def fetch_rows(session: AsyncSession) -> list[RegistrationRow]:
     return [RegistrationRow(*row) for row in result.all()]
 
 
-def compute_stats(rows: list[RegistrationRow], since_date: str | None) -> RegistrationStats:
-    """Aggregate counts. ``since_date`` is a ``YYYY-MM-DD`` UTC date (last digest).
+def compute_stats(rows: list[RegistrationRow], since: str | None) -> RegistrationStats:
+    """Aggregate counts. ``since`` is the ISO-8601 UTC timestamp of the last send.
 
-    ``new_since`` counts registrants created after ``since_date`` (all of them
-    when ``since_date`` is None — the first digest). ISO dates sort lexically, so
-    a string comparison on the date prefix is correct.
+    ``new_since`` counts registrants created after ``since`` (all of them when
+    ``since`` is None — the first digest). Comparing full timestamps (not just the
+    date prefix) means someone who registers later on the send's own day is still
+    counted; ISO-8601 with a fixed offset sorts lexically, so a string compare is
+    correct.
     """
     total = len(rows)
     opted_in = sum(1 for r in rows if r.updates_opt_in)
-    new_since = (
-        total
-        if since_date is None
-        else sum(1 for r in rows if r.created_at[:10] > since_date)
-    )
+    new_since = total if since is None else sum(1 for r in rows if r.created_at > since)
     rate = opted_in / total if total else 0.0
     return RegistrationStats(total=total, opted_in=opted_in, opt_in_rate=rate, new_since=new_since)
 

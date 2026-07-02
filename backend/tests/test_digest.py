@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 from datetime import UTC, datetime
@@ -92,20 +93,31 @@ def test_compute_stats_counts_and_rate():
         _row(name="B", opt_in=False, created_at="2026-07-02T09:00:00+00:00"),
         _row(name="C", opt_in=True, created_at="2026-07-02T11:00:00+00:00"),
     ]
-    stats = compute_stats(rows, since_date="2026-07-01")
+    stats = compute_stats(rows, since="2026-07-01T12:00:00+00:00")
     assert stats.total == 3
     assert stats.opted_in == 2
     assert stats.opt_in_rate == pytest.approx(2 / 3)
     assert stats.new_since == 2  # the two created on 07-02
 
 
+def test_compute_stats_counts_same_day_after_send():
+    """Finding 2: a registrant created after the send, on the send's own day, is
+    still 'new since' — the boundary is the full send timestamp, not the date."""
+    rows = [
+        _row(name="Before", created_at="2026-07-02T06:00:00+00:00"),
+        _row(name="After", created_at="2026-07-02T09:30:00+00:00"),
+    ]
+    # Previous digest sent at 07:00 the same day.
+    assert compute_stats(rows, since="2026-07-02T07:00:00+00:00").new_since == 1
+
+
 def test_compute_stats_first_digest_counts_all():
     rows = [_row(name="A"), _row(name="B")]
-    assert compute_stats(rows, since_date=None).new_since == 2
+    assert compute_stats(rows, since=None).new_since == 2
 
 
 def test_compute_stats_empty():
-    stats = compute_stats([], since_date=None)
+    stats = compute_stats([], since=None)
     assert stats == registrations.RegistrationStats(0, 0, 0.0, 0)
 
 
@@ -150,6 +162,33 @@ async def test_run_once_is_idempotent_within_a_day(monkeypatch):
     assert _SECRET_KEY not in sender.digests[0]["csv"]
 
 
+async def test_run_once_no_duplicate_send_under_concurrency(monkeypatch):
+    """Two schedulers racing on the same UTC day send exactly once.
+
+    With WEB_CONCURRENCY>1 each uvicorn worker runs its own ``_loop`` in a
+    separate process, so the in-process ``last_sent_at`` guard cannot prevent a
+    double send — only the DB advisory lock serializing check→send→mark can.
+    """
+    monkeypatch.setattr(config, "DIGEST_RECIPIENTS", ["team@example.com"])
+    monkeypatch.setattr(config, "DIGEST_HOUR_UTC", 7)
+    sender = FakeEmailSender()
+
+    async with session_scope() as setup:
+        await _create(AgentRepo(setup), "Ada", agent_id=_SECRET_KEY)
+        await setup.commit()
+
+    now = datetime(2026, 7, 2, 9, 0, tzinfo=UTC)
+
+    async def tick() -> bool:
+        async with session_scope() as session:
+            return await digest_scheduler.run_once(session, sender, now)
+
+    results = await asyncio.gather(tick(), tick())
+
+    assert sum(1 for sent in results if sent) == 1  # exactly one worker sent
+    assert len(sender.digests) == 1
+
+
 async def test_run_once_waits_until_digest_hour(monkeypatch):
     monkeypatch.setattr(config, "DIGEST_RECIPIENTS", ["team@example.com"])
     monkeypatch.setattr(config, "DIGEST_HOUR_UTC", 7)
@@ -175,7 +214,7 @@ async def test_send_now_forces_regardless_of_schedule(monkeypatch):
 
     assert stats.total == 1
     assert len(sender.digests) == 1
-    assert state.last_sent_date == "2026-07-02"
+    assert state.last_sent_at == "2026-07-02T03:00:00+00:00"
 
 
 async def test_console_sender_does_not_log_pii(caplog):
