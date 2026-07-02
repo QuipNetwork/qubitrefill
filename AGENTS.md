@@ -59,9 +59,11 @@ without the operator acting each time. An in-app scheduler (`orchestration/diges
 started in the app lifespan) sends once per UTC day at/after `DIGEST_HOUR_UTC`; the projection lives
 in `reporting/registrations.py` (modeled on `persistence/leaderboard.py`).
 
-- **Enable:** set `DIGEST_RECIPIENTS` (comma-separated) and a real `SMTP_PASSWORD`. Empty recipients
-  or no SMTP ⇒ the scheduler is inert (**fail-closed**) — the contact list never reaches the logs.
-- **Config:** `DIGEST_RECIPIENTS`, `DIGEST_HOUR_UTC` (default `7`). Recipients: Konrad, Brent, Paula.
+- **Enable:** set a real `SMTP_PASSWORD` (the recipient defaults to `bd@postquant.xyz`). Empty
+  recipients or no SMTP ⇒ the scheduler is inert (**fail-closed**) — the contact list never reaches
+  the logs.
+- **Config:** `DIGEST_RECIPIENTS`, `DIGEST_HOUR_UTC` (default `7`). Deployment defaults the recipient to
+  the BD alias `bd@postquant.xyz` (see `docker-compose.yml`); override with a comma-separated list.
 - **Manual send / verify:** `qtw send-digest` (real send) or `qtw send-digest --dry-run` (render the
   summary + CSV to stdout without sending).
 - **Safety:** the CSV uses an explicit column allowlist (`reporting.registrations.CSV_COLUMNS`) — the

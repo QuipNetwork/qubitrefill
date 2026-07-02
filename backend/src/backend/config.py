@@ -160,6 +160,8 @@ EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "Qubitrefill <noreply@quip.networ
 # Comma-separated recipient addresses. EMPTY ⇒ the digest is disabled (fail-closed):
 # the scheduler never runs and no PII leaves the DB. The digest also stays inert
 # unless SMTP_PASSWORD is set, so it can never fall back to logging the list.
+# The library default is empty; the deployment default (bd@postquant.xyz) is set
+# in docker-compose.yml.
 DIGEST_RECIPIENTS: list[str] = [
     addr.strip() for addr in os.environ.get("DIGEST_RECIPIENTS", "").split(",") if addr.strip()
 ]
