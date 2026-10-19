@@ -1,0 +1,4 @@
+#!/bin/bash
+# Flux-Orbit custom health check (invoked as `timeout 10 <script>`; exit 0 = healthy).
+# The default check probes "/", which this API does not serve — probe /healthz instead.
+exec curl -fsS --connect-timeout 3 --max-time 8 "http://localhost:${APP_PORT:-8000}/healthz" >/dev/null
