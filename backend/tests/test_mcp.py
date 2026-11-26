@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 
+import fastapi_mcp.transport.http as fastapi_mcp_http
 import pytest
 from fastapi.testclient import TestClient
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from backend.api.app import _MCP_OPERATIONS, create_app
 from backend.email.sender import FakeEmailSender, get_email_sender
@@ -167,3 +169,61 @@ def test_per_agent_tool_requires_key_through_mcp(client, fake_email):
     ok = _parse(with_key.text)["result"]
     assert not ok.get("isError"), ok
     assert "Neo" in ok["content"][0]["text"]
+
+
+# -----------------------------------------------------------------------------
+# Session and body limits on the public /mcp transport (GHSA-84m7-p3x7-pcfv)
+#
+# fastapi-mcp keeps a stateful session per MCP client and builds mcp's
+# StreamableHTTPSessionManager without passing any limits, so qupick relies on
+# mcp's defaults (mcp >= 1.30: idle sessions close, the session count is capped,
+# request bodies are capped). Before 1.30 sessions were never closed, so anyone
+# could open them until the app ran out of memory.
+# -----------------------------------------------------------------------------
+
+
+def _record_session_managers(monkeypatch, **overrides) -> list:
+    """Swap in a session manager that records itself (and applies overrides)."""
+    made = []
+
+    class Recording(StreamableHTTPSessionManager):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **{**kwargs, **overrides})
+            made.append(self)
+
+    monkeypatch.setattr(fastapi_mcp_http, "StreamableHTTPSessionManager", Recording)
+    return made
+
+
+def test_mcp_sessions_are_bounded_by_default(client, monkeypatch):
+    """The manager /mcp actually uses closes idle sessions and caps how many are open."""
+    made = _record_session_managers(monkeypatch)
+    _handshake(client)
+    assert made, "/mcp did not build a session manager"
+    manager = made[-1]
+    assert manager.session_idle_timeout is not None and manager.session_idle_timeout > 0
+    assert manager.max_sessions is not None and manager.max_sessions > 0
+
+
+def test_mcp_refuses_new_sessions_past_the_cap(client, monkeypatch):
+    """The cap is enforced through fastapi-mcp's request path: past it, 503."""
+    _record_session_managers(monkeypatch, max_sessions=2)
+    _handshake(client)
+    _handshake(client)
+    third = _rpc(client, {
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                   "clientInfo": {"name": "test", "version": "0"}},
+    })
+    assert third.status_code == 503, third.text
+
+
+def test_mcp_rejects_oversized_bodies(client):
+    """A request body over mcp's 4 MiB default is refused before it is parsed."""
+    padding = "x" * (4 * 1024 * 1024)
+    big = _rpc(client, {
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                   "clientInfo": {"name": padding, "version": "0"}},
+    })
+    assert big.status_code == 413, big.text[:200]
