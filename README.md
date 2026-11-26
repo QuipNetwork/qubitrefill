@@ -22,7 +22,9 @@ backend yourself. Five steps from clone to first run:
    ```
 
    Set at least `defaults.name` and `defaults.email` — registration emails your API key to that
-   address, and both `name` and `email` must be unique on the server.
+   address, and both `name` and `email` must be unique on the server. Registration is capped for
+   everyone together (20 an hour, 50 a day by default); if it answers `429`, wait the number of
+   seconds in its `Retry-After` header and try again.
 
 3. **Point Claude Code at the hosted MCP server.** Copy the example and set the `url` to the hosted
    endpoint. The API key goes **directly in the `Authorization` header** — Claude Code does **not**

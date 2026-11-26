@@ -154,6 +154,38 @@ SMTP_STARTTLS: bool = os.environ.get("SMTP_STARTTLS", "true").lower() != "false"
 EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "Qubitrefill <noreply@quip.network>")
 
 # -----------------------------------------------------------------------------
+# Registration rate limit — POST /agents is public and sends one email per call
+# -----------------------------------------------------------------------------
+
+
+def _positive_int(name: str, default: int) -> int:
+    """Read a positive integer from the environment; refuse anything else at startup.
+
+    Used for limits that must stay on: 0 or a negative value would read as "no
+    limit" to a later reader, so it is rejected instead of silently accepted.
+    """
+    raw = os.environ.get(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a positive integer, got {raw!r}") from None
+    if value < 1:
+        raise ValueError(f"{name} must be a positive integer, got {value}")
+    return value
+
+
+# Caps on successful registrations across ALL callers, over rolling windows. Every
+# successful registration sends exactly one API-key email (a repeat email gets 409
+# before any send), so these bound the mail that strangers can make us send. They
+# are global on purpose, not per IP: behind the Flux load balancer the client IP
+# isn't trustworthy, the MCP register_agent tool reaches the route through the
+# app's own ASGI stack, and a shared venue network would put everyone in one
+# bucket. Tune them in the environment; they cannot be switched off. The defaults
+# keep the day's mail well inside a ~100/day sending plan shared with the digest.
+REGISTER_LIMIT_PER_HOUR: int = _positive_int("REGISTER_LIMIT_PER_HOUR", 20)
+REGISTER_LIMIT_PER_DAY: int = _positive_int("REGISTER_LIMIT_PER_DAY", 50)
+
+# -----------------------------------------------------------------------------
 # Registration digest — a daily email of the registered-contact list to the team
 # -----------------------------------------------------------------------------
 
