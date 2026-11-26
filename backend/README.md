@@ -37,6 +37,7 @@ What each suite covers:
 | `test_pnl.py` | mark-to-market rollup |
 | `test_persistence.py` / `test_job_pipeline.py` | stores + leaderboard; first-solve & retune over the basket |
 | `test_api.py` | HTTP flow, 404s/422s, and a live WebSocket push |
+| `test_registration_limit.py` | registration caps: hourly + daily windows, 429 + Retry-After, no email when refused, concurrent requests, MCP path, values that can't switch it off |
 
 ## Test from the CLI (no server needed)
 
@@ -109,6 +110,25 @@ docker compose up -d --build      # backend on http://127.0.0.1:8000
 The image (`backend/Dockerfile`, multi-stage uv build, non-root) defaults to
 `MARKET_DATA_SOURCE=synthetic` and `GUROBI_IN_RACE=0`, so it solves offline with
 SA — no assets-api, Gurobi licence, or D-Wave token required.
+
+## Registration rate limit
+
+`POST /agents` is public and emails an API key on every success, so successful
+registrations are capped across all callers over rolling windows:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REGISTER_LIMIT_PER_HOUR` | `20` | successful registrations in the last hour |
+| `REGISTER_LIMIT_PER_DAY` | `50` | successful registrations in the last 24 hours |
+
+Over either cap the endpoint (and the MCP `register_agent` tool) answers `429` with
+`Retry-After` and sends no email. The caps are global on purpose, not per IP:
+behind a load balancer the client IP can't be trusted, MCP calls reach the route
+through the app itself, and a shared venue network would put everyone in one
+bucket. Both must be positive integers: `0`, a negative or a non-number stops the
+app at startup, so the limit can be tuned but never switched off. The count is
+the `agents` rows created in each window, under a Postgres advisory lock, so it
+holds across workers and restarts.
 
 ## Test the API by hand
 

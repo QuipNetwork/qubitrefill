@@ -1,7 +1,8 @@
 """HTTP routes.
 
 `POST /agents` is the public **registration** endpoint (unique email + name; the
-agent uuid is the API key, emailed out-of-band). Every other endpoint is gated by
+agent uuid is the API key, emailed out-of-band), capped globally by
+`registration_limit.py`. Every other endpoint is gated by
 the Bearer middleware and operates on the **authenticated** agent
 (`request.state.agent_id`) — no agent id appears in any URL.
 
@@ -29,6 +30,7 @@ from ..persistence.agents import AgentRepo, agent_to_config
 from ..persistence.jobs import JobRepo
 from ..persistence.leaderboard import build_leaderboard
 from ..solvers.types import SolverFailed
+from .registration_limit import enforce_registration_limit
 from .schemas import (
     AgentConfig,
     LeaderboardEntry,
@@ -68,6 +70,11 @@ async def register(
         raise HTTPException(status_code=409, detail="email already registered")
     if await repo.get_by_name(body.name) is not None:
         raise HTTPException(status_code=409, detail="name already taken")
+
+    # Global cap on successful registrations (each one sends an email). Holds an
+    # advisory lock until this request's transaction ends, so concurrent
+    # registrations can't both pass the count.
+    await enforce_registration_limit(session)
 
     api_key = uuid4().hex
     agent = await repo.create(
